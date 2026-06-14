@@ -1,9 +1,12 @@
+import 'dart:math';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/article_with_analysis.dart';
 import '../models/category.dart';
 import 'article_query.dart';
 import 'news_repository.dart';
+import 'recommendation_ranker.dart';
 
 class SupabaseNewsRepository implements NewsRepository {
   SupabaseNewsRepository({required SupabaseClient client}) : _client = client;
@@ -16,7 +19,7 @@ class SupabaseNewsRepository implements NewsRepository {
         .from('articles')
         .select(articleSelect)
         .eq('status', 'published')
-        .order('published_at')
+        .order('published_at', ascending: false)
         .limit(limit);
     return _mapArticles(rows);
   }
@@ -42,7 +45,7 @@ class SupabaseNewsRepository implements NewsRepository {
         .select(articleSelect)
         .eq('status', 'published')
         .eq('category_id', categoryId)
-        .order('published_at')
+        .order('published_at', ascending: false)
         .limit(limit);
     return _mapArticles(rows);
   }
@@ -84,7 +87,7 @@ class SupabaseNewsRepository implements NewsRepository {
         .select(articleSelect)
         .eq('status', 'published')
         .inFilter('id', articleIds)
-        .order('published_at')
+        .order('published_at', ascending: false)
         .limit(limit);
     return _mapArticles(rows);
   }
@@ -95,7 +98,7 @@ class SupabaseNewsRepository implements NewsRepository {
         .from('articles')
         .select(articleSelect)
         .eq('status', 'published')
-        .order('published_at')
+        .order('published_at', ascending: false)
         .limit(1)
         .maybeSingle();
     return row == null ? null : ArticleWithAnalysis.fromMap(row);
@@ -110,6 +113,86 @@ class SupabaseNewsRepository implements NewsRepository {
     return rows
         .map((row) => Category.fromMap(Map<String, dynamic>.from(row)))
         .toList(growable: false);
+  }
+
+  @override
+  Future<List<ArticleWithAnalysis>> getRecommendedArticles({
+    String? userId,
+    int limit = 10,
+  }) async {
+    if (userId == null) {
+      return getTrendingArticles(limit: limit);
+    }
+
+    try {
+      final results = await Future.wait<dynamic>([
+        _client
+            .from('reading_history')
+            .select('article_id, articles!inner($articleSelect)')
+            .eq('user_id', userId)
+            .order('read_at', ascending: false)
+            .limit(50),
+        _client
+            .from('user_preferences')
+            .select('preferred_category_id')
+            .eq('user_id', userId)
+            .maybeSingle(),
+        getLatestArticles(limit: max(limit * 6, 40)),
+      ]);
+
+      final historyRows = results[0] as List<dynamic>;
+      final preference = results[1] as Map<String, dynamic>?;
+      final candidates = results[2] as List<ArticleWithAnalysis>;
+      final historyArticles = historyRows
+          .map((row) => (row as Map<String, dynamic>)['articles'])
+          .whereType<Map>()
+          .map(
+            (row) =>
+                ArticleWithAnalysis.fromMap(Map<String, dynamic>.from(row)),
+          )
+          .toList(growable: false);
+
+      final categoryReadCounts = <String, int>{};
+      final topics = <String>{};
+      final keywords = <String>{};
+      for (final article in historyArticles) {
+        final categoryId = article.article.categoryId;
+        if (categoryId != null) {
+          categoryReadCounts.update(
+            categoryId,
+            (count) => count + 1,
+            ifAbsent: () => 1,
+          );
+        }
+        topics.add(article.topic.toLowerCase());
+        keywords.addAll(article.keywords.map((item) => item.toLowerCase()));
+      }
+
+      final ranked = RecommendationRanker.rankRecommended(
+        candidates,
+        RecommendationSignals(
+          preferredCategoryId: preference?['preferred_category_id']?.toString(),
+          categoryReadCounts: categoryReadCounts,
+          topics: topics,
+          keywords: keywords,
+          readArticleIds: historyArticles.map((article) => article.id).toSet(),
+        ),
+        limit: limit,
+      );
+      return ranked.isEmpty
+          ? RecommendationRanker.rankTrending(candidates, limit: limit)
+          : ranked;
+    } catch (_) {
+      return getTrendingArticles(limit: limit);
+    }
+  }
+
+  @override
+  Future<List<ArticleWithAnalysis>> getTrendingArticles({
+    int limit = 10,
+  }) async {
+    final candidates = await getLatestArticles(limit: max(limit * 5, 30));
+    return RecommendationRanker.rankTrending(candidates, limit: limit);
   }
 
   Future<Set<String>> _articleIdsMatchingText(

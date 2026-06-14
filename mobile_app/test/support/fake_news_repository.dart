@@ -18,6 +18,8 @@ class FakeNewsRepository implements NewsRepository {
   String? lastCategoryId;
   String? lastArticleId;
   String? lastSearchQuery;
+  String? lastRecommendationUserId;
+  int trendingCalls = 0;
 
   @override
   Future<List<ArticleWithAnalysis>> getLatestArticles({int limit = 20}) async {
@@ -79,6 +81,23 @@ class FakeNewsRepository implements NewsRepository {
 
   @override
   Future<List<Category>> getCategories() async => categories;
+
+  @override
+  Future<List<ArticleWithAnalysis>> getRecommendedArticles({
+    String? userId,
+    int limit = 10,
+  }) async {
+    lastRecommendationUserId = userId;
+    return articles.take(limit).toList(growable: false);
+  }
+
+  @override
+  Future<List<ArticleWithAnalysis>> getTrendingArticles({
+    int limit = 10,
+  }) async {
+    trendingCalls++;
+    return articles.take(limit).toList(growable: false);
+  }
 }
 
 const testCategories = [
@@ -93,6 +112,7 @@ final testArticles = [
       title: 'Digital economy expands across Indonesia',
       content: 'Digital infrastructure supports broader financial inclusion.',
       url: 'https://example.com/economy',
+      categoryId: 'economy',
       publishedAt: DateTime.utc(2026, 6, 13),
       status: 'published',
     ),
@@ -114,6 +134,7 @@ final testArticles = [
       title: 'AI adoption moves into production',
       content: 'Technology teams focus on governed AI systems.',
       url: 'https://example.com/technology',
+      categoryId: 'technology',
       publishedAt: DateTime.utc(2026, 6, 12),
       status: 'published',
     ),

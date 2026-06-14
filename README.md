@@ -5,10 +5,10 @@ Supabase and a Python ETL/NLP pipeline. The product helps users read news faster
 through summaries, sentiment labels, topic classification, keywords,
 bookmarks, reading history, and simple recommendations.
 
-This repository currently includes **Phase 3 personal features**. The mobile
-app reads published news from Supabase and supports email/password
-authentication, persistent sessions, private bookmarks, reading history,
-profile statistics, and a basic preferred-category setting.
+This repository currently includes **Phase 4 intelligence features**. The
+mobile app reads analyzed news from Supabase and adds an idempotent real-source
+pipeline, fallback NLP, simple personalized recommendations, trending insight,
+and related articles to the Phase 3 authentication and personal-data features.
 
 ## Current Deliverables
 
@@ -25,7 +25,13 @@ profile statistics, and a basic preferred-category setting.
 - Repository and provider boundaries for every user-specific table.
 - Supabase bootstrap using environment values instead of hard-coded keys.
 - PostgreSQL schema, seed data, indexes, triggers, grants, and RLS policies.
-- Modular Python ETL skeleton with dummy extraction and baseline NLP output.
+- NewsAPI/RSS extraction with a deterministic offline fallback.
+- Cleaning, URL/title deduplication, NLP analysis, and idempotent Supabase load.
+- Optional OpenAI-compatible summaries with local extractive fallback.
+- Rule-based sentiment/topic analysis and frequency-based keyword extraction.
+- Personalized recommendation ranking from history, preference, topic, and
+  keyword overlap.
+- Guest trending fallback and Home insight for top topics and keywords.
 - Product, architecture, and UI documentation.
 
 ## Tech Stack
@@ -69,6 +75,7 @@ MandiriNews/
 |   `-- seed_data.sql
 |-- docs/
 |   |-- architecture.md
+|   |-- data_pipeline.md
 |   |-- prd.md
 |   `-- ui_guideline.md
 |-- .env.example
@@ -151,7 +158,7 @@ idempotent and seeds all eight MVP categories.
 Guest users can continue reading public news. Bookmark actions prompt them to
 sign in, and no user-specific query assumes a non-null session.
 
-## Run the Python Pipeline Skeleton
+## Run the Python Pipeline
 
 The default command is a dry run. It does not write to Supabase.
 
@@ -159,18 +166,65 @@ The default command is a dry run. It does not write to Supabase.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r data_pipeline/requirements.txt
-python data_pipeline/main_pipeline.py
+python data_pipeline/main_pipeline.py --source dummy --limit 3
+```
+
+Use RSS or NewsAPI without changing the downstream flow:
+
+```powershell
+python data_pipeline/main_pipeline.py --source rss --limit 10
+python data_pipeline/main_pipeline.py --source newsapi --limit 10
 ```
 
 To load records into Supabase, copy `.env.example` to `.env`, set the backend
 values, and explicitly add `--live`:
 
 ```powershell
-python data_pipeline/main_pipeline.py --live
+python data_pipeline/main_pipeline.py --source auto --limit 20 --live
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` is backend-only. It must never appear in
 `mobile_app/.env`, Dart source, an APK, screenshots, or committed files.
+See [docs/data_pipeline.md](docs/data_pipeline.md) for provider configuration,
+NLP output, upsert behavior, tests, and fallback details.
+
+## Verify Phase 4 Intelligence
+
+Run Python checks:
+
+```powershell
+python -m unittest discover -s data_pipeline/tests -v
+python data_pipeline/main_pipeline.py --source dummy --limit 3
+```
+
+Run Flutter checks:
+
+```powershell
+Set-Location mobile_app
+flutter analyze
+flutter test
+```
+
+Manual recommendation test:
+
+1. As a guest, Home shows `Trending now`, derived from recent article topics,
+   keywords, and publication time.
+2. Sign in, choose a preferred category, and open two articles in that
+   category.
+3. Return to Home and refresh. `Recommended for you` should prioritize unread
+   articles matching the preferred/read categories, topics, or keywords.
+4. Reopening an article updates history and removes it from personalized
+   candidates when alternatives exist.
+
+Manual trending test:
+
+1. Load several analyzed records through the pipeline.
+2. Open Home and verify `Trending Topics` and `Top Keywords` chips.
+3. Run the pipeline again with the same records and verify chips are not
+   duplicated because the underlying article URLs are upserted.
+
+The MVP trend score is based on topic/keyword frequency plus recency. It is not
+an engagement or social-velocity metric.
 
 ## Apply the Supabase SQL
 
@@ -210,6 +264,9 @@ can select, insert, update, and delete only rows whose `user_id` equals
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Privileged ETL key, backend only |
 | `NEWS_API_KEY` | External provider credential for Phase 4 |
+| `NEWS_SOURCE` | `auto`, `newsapi`, `rss`, or `dummy` |
+| `NEWS_RSS_URLS` | Comma-separated public RSS feeds |
+| `LLM_SUMMARY_API_*` | Optional private summary endpoint configuration |
 
 ## Development Roadmap
 
@@ -220,12 +277,13 @@ can select, insert, update, and delete only rows whose `user_id` equals
    multi-field search.
 3. **Phase 3 - Authentication (complete):** persistent auth, guest handling,
    private bookmarks, deduplicated history, profile stats, and preference.
-4. **Phase 4 - Data Pipeline:** real API/RSS adapters, normalization,
-   deduplication, observability, and scheduled ingestion.
-5. **Phase 5 - NLP:** evaluated summarization, sentiment, topic, and keyword
-   models.
-6. **Phase 6 - Recommendations:** reading-history and content-based ranking.
-7. **Phase 7 - Portfolio:** screenshots, architecture assets, demo, and release.
+4. **Phase 4 - Intelligence MVP (complete):** real API/RSS adapters,
+   normalization, deduplication, fallback NLP, simple recommendations, and
+   trending insight.
+5. **Phase 5 - Quality and Automation:** evaluated NLP models, scheduled
+   ingestion, observability, richer recommendation signals, and release
+   hardening. RAG, advanced semantic search, analytics dashboards, and push
+   notifications remain future improvements.
 
 See [docs/prd.md](docs/prd.md), [docs/architecture.md](docs/architecture.md),
 and [docs/ui_guideline.md](docs/ui_guideline.md) for implementation contracts.

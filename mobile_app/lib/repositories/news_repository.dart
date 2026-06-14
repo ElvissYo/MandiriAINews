@@ -19,4 +19,11 @@ abstract interface class NewsRepository {
   Future<ArticleWithAnalysis?> getFeaturedArticle();
 
   Future<List<Category>> getCategories();
+
+  Future<List<ArticleWithAnalysis>> getRecommendedArticles({
+    String? userId,
+    int limit = 10,
+  });
+
+  Future<List<ArticleWithAnalysis>> getTrendingArticles({int limit = 10});
 }

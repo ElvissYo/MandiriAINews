@@ -71,6 +71,9 @@ The providers expose:
 - `categoriesProvider`.
 - `articleDetailProvider(articleId)`.
 - `searchArticlesProvider(query)`.
+- `recommendedArticlesProvider`.
+- `trendingArticlesProvider` and derived `trendingInsightProvider`.
+- `relatedArticlesProvider`.
 
 The repository joins `articles`, `sources`, `categories`, and
 `article_analysis`. Search first collects matching article IDs from title,
@@ -110,6 +113,29 @@ The mobile app contains only the public Supabase URL and anon/publishable key.
 Authorization depends on RLS; the service-role key remains restricted to the
 trusted Python pipeline.
 
+## Phase 4 Recommendation Flow
+
+```mermaid
+flowchart LR
+    A[Current User] --> B[Recommendation Provider]
+    B --> C[News Repository]
+    C --> D[Reading History]
+    C --> E[Preferred Category]
+    C --> F[Recent Analyzed Articles]
+    D --> G[Local Weighted Ranker]
+    E --> G
+    F --> G
+    G --> H[Recommended Home Section]
+```
+
+The ranker excludes read articles when alternatives exist and scores candidates
+using preferred category, frequently read categories, topic matches, keyword
+overlap, and recency. A guest skips personal queries and receives the trending
+ranking. History and preference writes invalidate the recommendation provider.
+
+Trending topics and keywords are derived from the same recent candidate set.
+This is an MVP content-frequency signal, not an engagement analytics system.
+
 ## Pipeline Contract
 
 Each stage consumes and returns dictionaries with stable fields:
@@ -128,8 +154,11 @@ load
   sources -> categories -> articles -> article_analysis
 ```
 
-The default load mode is dry-run. Live writes require both the explicit
-`--live` flag and backend credentials.
+Extraction supports NewsAPI, RSS, and deterministic dummy records. Auto mode
+falls back in that order based on available credentials and provider health.
+NLP uses optional remote summaries with local extractive, sentiment, topic, and
+keyword fallbacks. The default load mode is dry-run. Live writes require both
+the explicit `--live` flag and backend credentials.
 
 ## Database Relationships
 
@@ -161,6 +190,8 @@ erDiagram
 - Phase 2: Supabase-backed public feed, detail, category, and search.
 - Phase 3: Supabase Auth and user-owned bookmarks/history/preferences
   (implemented).
-- Phase 4: real providers and GitHub Actions/cron scheduling.
-- Phase 5-6: evaluated NLP and recommendation jobs.
+- Phase 4: real providers, fallback NLP, recommendation, and trending insight
+  (implemented).
+- Phase 5: scheduling, observability, model evaluation, richer ranking, and
+  release hardening.
 - Phase 7: signed Android release and portfolio assets.

@@ -4,12 +4,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/article_with_analysis.dart';
 import '../providers/app_providers.dart';
 import '../theme/app_colors.dart';
+import '../utils/app_routes.dart';
 import '../utils/date_formatter.dart';
 import '../widgets/app_empty_state.dart';
 import '../widgets/app_error_state.dart';
 import '../widgets/app_loading_state.dart';
 import '../widgets/article_image.dart';
 import '../widgets/bookmark_button.dart';
+import '../widgets/news_card.dart';
+import '../widgets/section_header.dart';
 import '../widgets/sentiment_badge.dart';
 
 class ArticleDetailScreen extends ConsumerStatefulWidget {
@@ -83,13 +86,20 @@ class _ArticleDetailScreenState extends ConsumerState<ArticleDetailScreen> {
   }
 }
 
-class _ArticleContent extends StatelessWidget {
+class _ArticleContent extends ConsumerWidget {
   const _ArticleContent({required this.article});
 
   final ArticleWithAnalysis article;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final related = ref.watch(
+      relatedArticlesProvider((
+        articleId: article.id,
+        categoryId: article.article.categoryId,
+        topic: article.topic,
+      )),
+    );
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
       children: [
@@ -157,10 +167,12 @@ class _ArticleContent extends StatelessWidget {
             SentimentBadge(sentiment: article.sentiment),
             if (article.sentimentScore case final score?)
               Chip(label: Text('Score ${score.toStringAsFixed(2)}')),
-            Chip(label: Text(article.topic)),
+            Chip(label: Text('Topic: ${article.topic}')),
           ],
         ),
         const SizedBox(height: 14),
+        Text('Keywords', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
         if (article.keywords.isEmpty)
           Text(
             'Keywords are not available.',
@@ -178,6 +190,49 @@ class _ArticleContent extends StatelessWidget {
         Text('Full article', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 12),
         Text(article.content, style: Theme.of(context).textTheme.bodyLarge),
+        const SizedBox(height: 30),
+        const SectionHeader(title: 'Related articles'),
+        const SizedBox(height: 12),
+        related.when(
+          loading: () => const SizedBox(
+            height: 72,
+            child: Center(
+              child: CircularProgressIndicator(
+                color: AppColors.coral,
+                strokeWidth: 2,
+              ),
+            ),
+          ),
+          error: (_, _) => Text(
+            'Related articles are unavailable.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          data: (articles) {
+            if (articles.isEmpty) {
+              return Text(
+                'No related articles found.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              );
+            }
+            return Column(
+              children: articles
+                  .map(
+                    (relatedArticle) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: NewsCard(
+                        article: relatedArticle,
+                        onTap: () => Navigator.pushReplacementNamed(
+                          context,
+                          AppRoutes.articleDetail,
+                          arguments: relatedArticle.id,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            );
+          },
+        ),
       ],
     );
   }

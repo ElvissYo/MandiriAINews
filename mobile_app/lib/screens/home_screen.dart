@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/article_with_analysis.dart';
 import '../models/category.dart';
+import '../models/trending_insight.dart';
 import '../providers/app_providers.dart';
 import '../theme/app_colors.dart';
 import '../utils/app_routes.dart';
@@ -21,7 +22,10 @@ class HomeScreen extends ConsumerWidget {
     final categories = ref.watch(categoriesProvider);
     final featuredArticle = ref.watch(featuredArticleProvider);
     final latestArticles = ref.watch(latestArticlesProvider);
+    final recommendedArticles = ref.watch(recommendedArticlesProvider);
+    final trendingInsight = ref.watch(trendingInsightProvider);
     final selectedCategoryId = ref.watch(selectedCategoryProvider);
+    final currentUser = ref.watch(currentUserProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -89,6 +93,25 @@ class HomeScreen extends ConsumerWidget {
               onRetry: () => ref.invalidate(featuredArticleProvider),
             ),
             const SizedBox(height: 28),
+            const SectionHeader(title: 'Trending Topics'),
+            const SizedBox(height: 12),
+            _TrendingInsightSection(
+              value: trendingInsight,
+              onRetry: () => ref.invalidate(trendingInsightProvider),
+            ),
+            const SizedBox(height: 28),
+            SectionHeader(
+              title: currentUser == null
+                  ? 'Trending now'
+                  : 'Recommended for you',
+            ),
+            const SizedBox(height: 12),
+            _HorizontalArticleList(
+              value: recommendedArticles,
+              onOpen: (article) => _openArticle(context, article.id),
+              onRetry: () => ref.invalidate(recommendedArticlesProvider),
+            ),
+            const SizedBox(height: 28),
             SectionHeader(
               title: selectedCategoryId == null
                   ? 'Latest news'
@@ -113,7 +136,14 @@ class HomeScreen extends ConsumerWidget {
     ref.invalidate(categoriesProvider);
     ref.invalidate(featuredArticleProvider);
     ref.invalidate(latestArticlesProvider);
-    await ref.read(latestArticlesProvider.future);
+    ref.invalidate(recommendedArticlesProvider);
+    ref.invalidate(trendingArticlesProvider);
+    ref.invalidate(trendingInsightProvider);
+    await Future.wait([
+      ref.read(latestArticlesProvider.future),
+      ref.read(recommendedArticlesProvider.future),
+      ref.read(trendingInsightProvider.future),
+    ]);
   }
 
   void _openArticle(BuildContext context, String articleId) {
@@ -134,6 +164,146 @@ class HomeScreen extends ConsumerWidget {
         return 'Category news';
       },
       orElse: () => 'Category news',
+    );
+  }
+}
+
+class _TrendingInsightSection extends StatelessWidget {
+  const _TrendingInsightSection({required this.value, required this.onRetry});
+
+  final AsyncValue<TrendingInsight> value;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return value.when(
+      loading: () => const SizedBox(
+        height: 72,
+        child: Center(
+          child: CircularProgressIndicator(
+            color: AppColors.coral,
+            strokeWidth: 2,
+          ),
+        ),
+      ),
+      error: (_, _) => Align(
+        alignment: Alignment.centerLeft,
+        child: ActionChip(
+          avatar: const Icon(Icons.refresh, size: 18),
+          label: const Text('Reload trends'),
+          onPressed: onRetry,
+        ),
+      ),
+      data: (insight) {
+        if (insight.topics.isEmpty && insight.keywords.isEmpty) {
+          return Text(
+            'Trend insight will appear after analyzed articles are available.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          );
+        }
+        return Container(
+          key: const Key('trendingInsightSection'),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: insight.topics
+                    .map(
+                      (topic) => Chip(
+                        avatar: const Icon(
+                          Icons.trending_up,
+                          size: 17,
+                          color: AppColors.coral,
+                        ),
+                        label: Text(topic),
+                      ),
+                    )
+                    .toList(growable: false),
+              ),
+              if (insight.keywords.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Text(
+                  'Top Keywords',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: insight.keywords
+                      .map((keyword) => Chip(label: Text('#$keyword')))
+                      .toList(growable: false),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _HorizontalArticleList extends StatelessWidget {
+  const _HorizontalArticleList({
+    required this.value,
+    required this.onOpen,
+    required this.onRetry,
+  });
+
+  final AsyncValue<List<ArticleWithAnalysis>> value;
+  final ValueChanged<ArticleWithAnalysis> onOpen;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return value.when(
+      loading: () => const SizedBox(
+        height: 152,
+        child: Center(
+          child: CircularProgressIndicator(
+            color: AppColors.coral,
+            strokeWidth: 2,
+          ),
+        ),
+      ),
+      error: (error, _) => AppErrorState(
+        title: 'Recommendations are unavailable',
+        error: error,
+        onRetry: onRetry,
+      ),
+      data: (articles) {
+        if (articles.isEmpty) {
+          return const AppEmptyState(
+            icon: Icons.recommend_outlined,
+            title: 'No recommendations yet',
+            message: 'Read a few articles or refresh when more news is loaded.',
+          );
+        }
+        return SizedBox(
+          key: const Key('recommendedArticlesSection'),
+          height: 152,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: articles.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final article = articles[index];
+              return SizedBox(
+                width: 340,
+                child: NewsCard(article: article, onTap: () => onOpen(article)),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }

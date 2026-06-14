@@ -5,6 +5,7 @@ import '../models/article_with_analysis.dart';
 import '../models/category.dart';
 import '../models/profile_stats.dart';
 import '../models/reading_history_entry.dart';
+import '../models/trending_insight.dart';
 import '../models/user_preference.dart';
 import '../repositories/auth_repository.dart';
 import '../repositories/bookmark_repository.dart';
@@ -151,6 +152,26 @@ final categoriesProvider = FutureProvider.autoDispose<List<Category>>((ref) {
   return ref.watch(newsRepositoryProvider).getCategories();
 });
 
+final recommendedArticlesProvider =
+    FutureProvider.autoDispose<List<ArticleWithAnalysis>>((ref) {
+      final user = ref.watch(currentUserProvider);
+      return ref
+          .watch(newsRepositoryProvider)
+          .getRecommendedArticles(userId: user?.id);
+    });
+
+final trendingArticlesProvider =
+    FutureProvider.autoDispose<List<ArticleWithAnalysis>>((ref) {
+      return ref.watch(newsRepositoryProvider).getTrendingArticles();
+    });
+
+final trendingInsightProvider = FutureProvider.autoDispose<TrendingInsight>((
+  ref,
+) async {
+  final articles = await ref.watch(trendingArticlesProvider.future);
+  return TrendingInsight.fromArticles(articles);
+});
+
 final articleDetailProvider = FutureProvider.autoDispose
     .family<ArticleWithAnalysis?, String>((ref, articleId) {
       return ref.watch(newsRepositoryProvider).getArticleById(articleId);
@@ -159,6 +180,30 @@ final articleDetailProvider = FutureProvider.autoDispose
 final searchArticlesProvider = FutureProvider.autoDispose
     .family<List<ArticleWithAnalysis>, String>((ref, query) {
       return ref.watch(newsRepositoryProvider).searchArticles(query);
+    });
+
+typedef RelatedArticleRequest = ({
+  String articleId,
+  String? categoryId,
+  String topic,
+});
+
+final relatedArticlesProvider = FutureProvider.autoDispose
+    .family<List<ArticleWithAnalysis>, RelatedArticleRequest>((
+      ref,
+      request,
+    ) async {
+      final repository = ref.watch(newsRepositoryProvider);
+      final articles = request.categoryId == null
+          ? await repository.searchArticles(request.topic, limit: 6)
+          : await repository.getArticlesByCategory(
+              request.categoryId!,
+              limit: 6,
+            );
+      return articles
+          .where((article) => article.id != request.articleId)
+          .take(3)
+          .toList(growable: false);
     });
 
 final userBookmarksProvider =
@@ -257,6 +302,7 @@ class ReadingHistoryActions {
         .recordArticleRead(user.id, articleId);
     ref.invalidate(readingHistoryProvider);
     ref.invalidate(profileStatsProvider);
+    ref.invalidate(recommendedArticlesProvider);
   }
 }
 
@@ -278,6 +324,7 @@ class UserPreferenceActions {
         .read(userPreferenceRepositoryProvider)
         .savePreferredCategory(user.id, categoryId);
     ref.invalidate(userPreferenceProvider);
+    ref.invalidate(recommendedArticlesProvider);
   }
 }
 

@@ -35,21 +35,29 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Digital economy expands across Indonesia'), findsWidgets);
-    expect(find.text('AI adoption moves into production'), findsOneWidget);
+    expect(find.text('AI adoption moves into production'), findsWidgets);
+    expect(find.text('Trending Topics'), findsOneWidget);
+    expect(find.text('Top Keywords'), findsOneWidget);
+    expect(find.text('Trending now'), findsOneWidget);
+    expect(find.byKey(const Key('recommendedArticlesSection')), findsOneWidget);
+    expect(repositories.news.lastRecommendationUserId, isNull);
 
     await tester.tap(find.widgetWithText(ChoiceChip, 'Technology'));
     await tester.pumpAndSettle();
 
     expect(repositories.news.lastCategoryId, 'technology');
-    expect(find.text('AI adoption moves into production'), findsOneWidget);
+    expect(find.text('AI adoption moves into production'), findsWidgets);
 
-    await tester.tap(find.text('AI adoption moves into production'));
+    await tester.tap(find.text('AI adoption moves into production').first);
     await tester.pumpAndSettle();
 
     expect(repositories.news.lastArticleId, 'article-technology');
     expect(find.text('AI SUMMARY'), findsOneWidget);
     expect(find.text('Companies are adopting governed AI systems.'), findsOne);
     expect(find.text('Score 0.00'), findsOneWidget);
+    expect(find.text('Topic: Technology'), findsOneWidget);
+    expect(find.text('#ai'), findsOneWidget);
+    expect(find.text('Related articles'), findsOneWidget);
   });
 
   testWidgets('search displays matching Supabase-style results', (
@@ -151,7 +159,7 @@ void main() {
     await tester.pumpWidget(repositories.app(initialRoute: AppRoutes.home));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('AI adoption moves into production'));
+    await tester.tap(find.text('AI adoption moves into production').first);
     await tester.pumpAndSettle();
     expect(
       repositories.history.readAtByArticleId,
