@@ -189,7 +189,36 @@ class _ArticleContent extends ConsumerWidget {
                 .toList(growable: false),
           ),
         const SizedBox(height: 28),
-        Text('Full article', style: Theme.of(context).textTheme.titleLarge),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                article.contentIsSnippet ? 'Article snippet' : 'Full article',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            if (article.contentIsSnippet)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  border: Border.all(color: AppColors.border),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: const Text(
+                  'Snippet from source',
+                  style: TextStyle(
+                    color: AppColors.navyMuted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+          ],
+        ),
         const SizedBox(height: 12),
         Text(article.content, style: Theme.of(context).textTheme.bodyLarge),
         const SizedBox(height: 30),

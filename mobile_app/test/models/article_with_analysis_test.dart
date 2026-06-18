@@ -8,11 +8,15 @@ void main() {
       'title': 'A seeded article',
       'content': '',
       'url': 'https://example.com/article',
+      'canonical_url': 'https://example.com/canonical-article',
       'image_url': null,
       'source_id': 'source-1',
       'category_id': 'category-1',
       'published_at': '2026-06-13T02:30:00Z',
       'status': 'published',
+      'content_is_snippet': true,
+      'extraction_method': 'rss_snippet',
+      'extraction_status': 'snippet',
       'sources': {
         'id': 'source-1',
         'name': 'Demo Source',
@@ -45,5 +49,12 @@ void main() {
     expect(article.topic, 'Economy');
     expect(article.keywords, isEmpty);
     expect(article.content, 'Full article content is not available.');
+    expect(article.contentIsSnippet, isTrue);
+    expect(
+      article.article.canonicalUrl,
+      'https://example.com/canonical-article',
+    );
+    expect(article.article.extractionMethod, 'rss_snippet');
+    expect(article.article.extractionStatus, 'snippet');
   });
 }

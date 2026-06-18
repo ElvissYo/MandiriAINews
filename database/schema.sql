@@ -34,21 +34,55 @@ create table if not exists public.articles (
   title text not null,
   content text not null default '',
   url text not null,
+  canonical_url text,
   image_url text,
   source_id uuid references public.sources(id) on delete set null,
   category_id uuid references public.categories(id) on delete set null,
   published_at timestamptz not null,
   status text not null default 'published',
   content_is_snippet boolean not null default false,
+  extraction_method text not null default 'source_snippet',
+  extraction_status text not null default 'snippet',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint articles_url_unique unique (url),
   constraint articles_status_check
-    check (status in ('draft', 'published', 'archived'))
+    check (status in ('draft', 'published', 'archived')),
+  constraint articles_extraction_status_check
+    check (
+      extraction_status in (
+        'full_content',
+        'snippet',
+        'failed',
+        'blocked',
+        'blocked_by_meta_robots',
+        'invalid_url'
+      )
+    )
 );
 
 alter table public.articles
+  add column if not exists canonical_url text;
+alter table public.articles
   add column if not exists content_is_snippet boolean not null default false;
+alter table public.articles
+  add column if not exists extraction_method text not null default 'source_snippet';
+alter table public.articles
+  add column if not exists extraction_status text not null default 'snippet';
+alter table public.articles
+  drop constraint if exists articles_extraction_status_check;
+alter table public.articles
+  add constraint articles_extraction_status_check
+  check (
+    extraction_status in (
+      'full_content',
+      'snippet',
+      'failed',
+      'blocked',
+      'blocked_by_meta_robots',
+      'invalid_url'
+    )
+  );
 
 create table if not exists public.article_analysis (
   id uuid primary key default gen_random_uuid(),
@@ -126,6 +160,10 @@ create table if not exists public.pipeline_runs (
   failed integer not null default 0,
   status text not null,
   error_message text,
+  source_diagnostics jsonb not null default '[]'::jsonb,
+  full_content_success_count integer not null default 0,
+  snippet_only_count integer not null default 0,
+  duplicate_count integer not null default 0,
   created_at timestamptz not null default now(),
   constraint pipeline_runs_counts_check check (
     extracted >= 0
@@ -133,11 +171,35 @@ create table if not exists public.pipeline_runs (
     and inserted >= 0
     and skipped_duplicates >= 0
     and failed >= 0
+    and full_content_success_count >= 0
+    and snippet_only_count >= 0
+    and duplicate_count >= 0
   ),
     constraint pipeline_runs_status_check
       check (status in ('success', 'partial', 'failed', 'no_data'))
   );
 
+alter table public.pipeline_runs
+  add column if not exists source_diagnostics jsonb not null default '[]'::jsonb;
+alter table public.pipeline_runs
+  add column if not exists full_content_success_count integer not null default 0;
+alter table public.pipeline_runs
+  add column if not exists snippet_only_count integer not null default 0;
+alter table public.pipeline_runs
+  add column if not exists duplicate_count integer not null default 0;
+alter table public.pipeline_runs
+  drop constraint if exists pipeline_runs_counts_check;
+alter table public.pipeline_runs
+  add constraint pipeline_runs_counts_check check (
+    extracted >= 0
+    and cleaned >= 0
+    and inserted >= 0
+    and skipped_duplicates >= 0
+    and failed >= 0
+    and full_content_success_count >= 0
+    and snippet_only_count >= 0
+    and duplicate_count >= 0
+  );
 alter table public.pipeline_runs
   drop constraint if exists pipeline_runs_status_check;
 alter table public.pipeline_runs
@@ -152,6 +214,26 @@ create index if not exists articles_category_id_idx
   on public.articles (category_id);
 create index if not exists articles_source_id_idx
   on public.articles (source_id);
+do $$
+begin
+  if to_regclass('public.articles_canonical_url_unique_idx') is null then
+    if exists (
+      select 1
+      from public.articles
+      where canonical_url is not null
+      group by canonical_url
+      having count(*) > 1
+    ) then
+      raise notice
+        'Skipping articles_canonical_url_unique_idx because duplicate canonical_url values already exist.';
+    else
+      execute '
+        create unique index articles_canonical_url_unique_idx
+        on public.articles (canonical_url)
+        where canonical_url is not null';
+    end if;
+  end if;
+end $$;
 create index if not exists article_analysis_topic_idx
   on public.article_analysis (topic);
 create index if not exists article_analysis_keywords_gin_idx

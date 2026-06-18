@@ -93,6 +93,12 @@ def run_pipeline(
     raw_count = len(extraction.articles) if extraction else 0
     clean_count = len(clean_records)
     duplicate_count = max(raw_count - clean_count, 0)
+    content_stats = _content_stats(clean_records)
+    source_diagnostics = _diagnostics_with_cleaning(
+        extraction.diagnostics if extraction else (),
+        cleaned=clean_count,
+        duplicate=duplicate_count,
+    )
     result: dict[str, Any] = {
         "status": status,
         "requested_source": source,
@@ -106,6 +112,9 @@ def run_pipeline(
         "raw_count": raw_count,
         "clean_count": clean_count,
         "cleaning_duplicates_or_invalid": duplicate_count,
+        "full_content_success_count": content_stats["full_content_success_count"],
+        "snippet_only_count": content_stats["snippet_only_count"],
+        "source_diagnostics": source_diagnostics,
         "analyzed_count": len(analyzed_records),
         "extraction_attempts": extraction.attempts if extraction else 0,
         "load": asdict(load_result),
@@ -124,9 +133,15 @@ def run_pipeline(
             "skipped_duplicates": (
                 duplicate_count + load_result.skipped_duplicates
             ),
+            "duplicate_count": duplicate_count + load_result.skipped_duplicates,
             "failed": load_result.failed,
             "status": status,
             "error_message": _joined_errors(error_messages),
+            "source_diagnostics": source_diagnostics,
+            "full_content_success_count": content_stats[
+                "full_content_success_count"
+            ],
+            "snippet_only_count": content_stats["snippet_only_count"],
         }
         try:
             pipeline_loader.record_pipeline_run(run_payload)
@@ -214,6 +229,33 @@ def _joined_errors(errors: list[str]) -> str | None:
     if not errors:
         return None
     return " | ".join(errors)[:2000]
+
+
+def _content_stats(records: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "full_content_success_count": sum(
+            record.get("extraction_status") == "full_content"
+            for record in records
+        ),
+        "snippet_only_count": sum(
+            bool(record.get("content_is_snippet", True)) for record in records
+        ),
+    }
+
+
+def _diagnostics_with_cleaning(
+    diagnostics: tuple[dict[str, Any], ...],
+    *,
+    cleaned: int,
+    duplicate: int,
+) -> list[dict[str, Any]]:
+    if not diagnostics:
+        return []
+    updated = [dict(item) for item in diagnostics]
+    if updated:
+        updated[-1]["cleaned_count"] = cleaned
+        updated[-1]["duplicate_count"] = duplicate
+    return updated
 
 
 if __name__ == "__main__":

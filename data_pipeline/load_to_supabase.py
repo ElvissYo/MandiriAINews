@@ -108,11 +108,16 @@ class SupabaseLoader:
                     )
                     category_count += 1
 
-                existing_id = self._existing_article_id(client, article["url"])
+                existing_id = self._existing_article_id(
+                    client,
+                    article["url"],
+                    article.get("canonical_url"),
+                )
                 article_payload = {
                     "title": article["title"],
                     "content": article["content"],
                     "url": article["url"],
+                    "canonical_url": article.get("canonical_url"),
                     "image_url": article.get("image_url"),
                     "source_id": source_ids[source_name],
                     "category_id": category_ids[category_name],
@@ -121,19 +126,36 @@ class SupabaseLoader:
                     "content_is_snippet": bool(
                         article.get("content_is_snippet", False)
                     ),
+                    "extraction_method": article.get("extraction_method")
+                    or "source_snippet",
+                    "extraction_status": article.get("extraction_status")
+                    or (
+                        "snippet"
+                        if bool(article.get("content_is_snippet", False))
+                        else "full_content"
+                    ),
                 }
-                response = (
-                    client.table("articles")
-                    .upsert(article_payload, on_conflict="url")
-                    .execute()
-                )
-                article_id = existing_id or self._response_id(
-                    client,
-                    response,
-                    table="articles",
-                    column="url",
-                    value=article["url"],
-                )
+                if existing_id is None:
+                    response = (
+                        client.table("articles")
+                        .upsert(article_payload, on_conflict="url")
+                        .execute()
+                    )
+                    article_id = self._response_id(
+                        client,
+                        response,
+                        table="articles",
+                        column="url",
+                        value=article["url"],
+                    )
+                else:
+                    (
+                        client.table("articles")
+                        .update(article_payload)
+                        .eq("id", existing_id)
+                        .execute()
+                    )
+                    article_id = existing_id
                 client.table("article_analysis").upsert(
                     {
                         "article_id": article_id,
@@ -233,7 +255,22 @@ class SupabaseLoader:
         )
 
     @staticmethod
-    def _existing_article_id(client: Any, url: str) -> str | None:
+    def _existing_article_id(
+        client: Any,
+        url: str,
+        canonical_url: str | None = None,
+    ) -> str | None:
+        lookup_values = [value for value in (canonical_url, url) if value]
+        for value in lookup_values:
+            response = (
+                client.table("articles")
+                .select("id")
+                .eq("canonical_url", value)
+                .limit(1)
+                .execute()
+            )
+            if response.data:
+                return str(response.data[0]["id"])
         response = (
             client.table("articles")
             .select("id")
@@ -331,6 +368,16 @@ class SupabaseLoader:
             return "topic is empty"
         if not isinstance(analysis["keywords"], list) or not analysis["keywords"]:
             return "keywords must be a non-empty list"
+        extraction_status = str(record.get("extraction_status") or "snippet")
+        if extraction_status not in {
+            "full_content",
+            "snippet",
+            "failed",
+            "blocked",
+            "blocked_by_meta_robots",
+            "invalid_url",
+        }:
+            return "extraction_status is invalid"
         return None
 
     @staticmethod

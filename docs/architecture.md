@@ -4,8 +4,9 @@
 
 ```mermaid
 flowchart TD
-    A[External News API or RSS] --> B[Python Extract]
-    B --> C[Clean and Deduplicate]
+    A[NewsAPI, GDELT, or RSS] --> B[Python Extract]
+    B --> L[Legal Content Extraction]
+    L --> C[Clean and Deduplicate]
     C --> D[NLP Analysis]
     D --> J[Optional Embeddings]
     J --> E[Supabase Load with Service Role]
@@ -207,14 +208,42 @@ only in trusted Python code; without it, answers are extractive summaries from
 retrieved articles. Flutter displays the answer and source article titles but
 never receives service-role or LLM keys.
 
+## Phase 6B Source Reliability Flow
+
+```mermaid
+flowchart LR
+    A[NewsAPI, GDELT, or RSS] --> B[Source Adapter]
+    B --> C[Public Content Extractor]
+    C --> D[Snippet Fallback]
+    C --> E[Canonical URL and Extraction Metadata]
+    D --> F[Clean and Strong Deduplicate]
+    E --> F
+    F --> G[Supabase Load]
+    G --> H[(Articles)]
+    G --> I[(Pipeline Runs Source Diagnostics)]
+```
+
+Content extraction is conservative: RSS full content is used when supplied,
+then public meta tags or article body text when directly accessible. The
+pipeline does not bypass paywalls, login walls, blocked HTTP responses,
+`nosnippet` robots meta, or publisher restrictions. If extraction fails, the
+source snippet remains the article body and `content_is_snippet=true` tells
+Flutter to label it as a source snippet.
+
+GDELT requests honor `Retry-After`, exponential backoff, optional cooldown,
+and a local cache for repeated identical queries. In auto mode, a GDELT 429 or
+other provider failure is recorded and the next configured real source is
+tried. If all real sources fail, the run is `no_data`; no dummy article is
+inserted.
+
 ## Pipeline Contract
 
 Each stage consumes and returns dictionaries with stable fields:
 
 ```text
 extract
-  title, content, content_is_snippet, url, image_url, source_*, category,
-  published_at
+  title, content, content_is_snippet, extraction_method, extraction_status,
+  canonical_url, url, image_url, source_*, category, published_at
 
 clean
   normalized fields + status
@@ -230,6 +259,9 @@ Extraction supports NewsAPI, open-data GDELT, and configured RSS feeds. Auto
 mode tries those real sources in that order based on credentials, settings,
 and provider health. If none returns usable records, the run is logged as
 `no_data`; NLP and article loading are skipped.
+RSS supports comma-separated or newline-separated `NEWS_RSS_URLS`. Cleaning
+deduplicates by canonical URL, normalized URL, exact title key, and
+near-identical title similarity across all sources.
 NLP uses optional remote summaries with local extractive, sentiment, topic, and
 keyword fallbacks. The default load mode is dry-run. Live writes require both
 the explicit `--live` flag and backend credentials.
@@ -271,5 +303,7 @@ erDiagram
   hardening (implemented).
 - Phase 6A: provider-backed AI/NLP, optional embeddings, semantic search, and
   source-grounded News Assistant Q&A (implemented).
+- Phase 6B: legal content extraction, multi-RSS reliability, GDELT mitigation,
+  source diagnostics, and stronger cross-source deduplication (implemented).
 - Later release work: live evidence, signed Android release preparation, and
   portfolio presentation.

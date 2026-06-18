@@ -2,10 +2,10 @@
 
 ## Scope
 
-The Advanced Phase 6A pipeline performs:
+The Phase 6B pipeline performs:
 
 ```text
-extract with retry -> clean/deduplicate -> NLP analysis/evaluation
+extract with retry/content enrichment -> clean/deduplicate -> NLP analysis/evaluation
   -> optional embeddings -> Supabase upsert -> pipeline run observability
 ```
 
@@ -37,9 +37,17 @@ NEWS_GDELT_ENABLED=true
 NEWS_GDELT_QUERY=Indonesia OR ASEAN
 NEWS_GDELT_TIMESPAN=1d
 NEWS_GDELT_MAX_RECORDS=50
+NEWS_GDELT_COOLDOWN_SECONDS=0
+NEWS_GDELT_CACHE_TTL_MINUTES=15
+NEWS_GDELT_MAX_RETRIES=3
 NEWS_RSS_URLS=https://news.google.com/rss?hl=id&gl=ID&ceid=ID:id
 NEWS_RETRY_ATTEMPTS=3
 NEWS_RETRY_DELAY_SECONDS=1
+NEWS_FULL_CONTENT_ENABLED=true
+NEWS_FULL_CONTENT_MAX_ARTICLES=10
+NEWS_CONTENT_TIMEOUT=8
+NEWS_CONTENT_RETRY_ATTEMPTS=2
+NEWS_CONTENT_EXTRACTION_DELAY_SECONDS=0.5
 ```
 
 GDELT DOC 2.0 is an open-data, no-key source. `NEWS_SOURCE=auto` tries
@@ -48,6 +56,10 @@ configured through `NEWS_RSS_URLS`. Set `NEWS_GDELT_ENABLED=false`
 to skip GDELT only in auto mode. An explicit `--source gdelt` run still uses
 GDELT. If every real provider fails or returns zero records, the run ends as
 `no_data` and writes no articles.
+
+`NEWS_RSS_URLS` accepts comma-separated or newline-separated public RSS URLs.
+Each feed receives its own source diagnostic entry so partial feed failures are
+visible without stopping other feeds.
 
 Optional LLM summary settings:
 
@@ -144,6 +156,39 @@ python data_pipeline/main_pipeline.py --source gdelt --limit 10 --live
 Repeat both commands. Existing URLs are updated idempotently and counted as
 `skipped_duplicates`; they do not create duplicate rows.
 
+Multi-RSS dry-run example:
+
+```powershell
+$env:NEWS_RSS_URLS="https://feed.example/one.xml,https://feed.example/two.xml"
+python data_pipeline/main_pipeline.py --source rss --limit 10
+```
+
+Use real public feeds in place of the example URLs.
+
+## Content Extraction
+
+The extractor stores article text in this order:
+
+1. RSS full content such as `content:encoded` when available.
+2. Public canonical URL and meta description from the publisher page.
+3. Public article-body or paragraph text when it is directly accessible.
+4. The RSS, GDELT, or NewsAPI snippet when full text is unavailable.
+
+It uses a polite user agent, timeout, bounded retry, and optional delay between
+article-page fetches. It does not bypass paywalls, login walls, HTTP 401/403/451
+responses, `nosnippet` robots meta, or publisher restrictions. Extraction
+failure never fails the whole pipeline.
+
+The stored article metadata is:
+
+| Field | Meaning |
+| --- | --- |
+| `content` | Best legally available content or snippet |
+| `content_is_snippet` | `true` when `content` is not confirmed full text |
+| `extraction_method` | `rss_full_content`, `article_body`, `meta_description`, `source_snippet`, etc. |
+| `extraction_status` | `full_content`, `snippet`, `failed`, `blocked`, `blocked_by_meta_robots`, or `invalid_url` |
+| `canonical_url` | Public canonical URL when found |
+
 ## Cleaning Contract
 
 The cleaning stage:
@@ -154,8 +199,9 @@ The cleaning stage:
 - converts timestamps to UTC ISO-8601;
 - normalizes source names;
 - applies `published` status;
-- marks RSS, NewsAPI, and GDELT content as `content_is_snippet=true`;
-- removes duplicates by canonical URL or normalized title;
+- preserves extraction metadata and snippet/full-content status;
+- removes duplicates by canonical URL, normalized URL, exact title key, or
+  near-identical title similarity;
 - rejects obvious demo/test markers and reserved example-domain records before
   any Supabase write.
 
@@ -175,6 +221,18 @@ present; otherwise the title becomes the snippet fallback.
 by the CLI `--limit`. Boolean `OR` queries are wrapped in parentheses for the
 GDELT query syntax. See the
 [official GDELT DOC 2.0 API overview](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/).
+
+GDELT reliability controls:
+
+| Variable | Behavior |
+| --- | --- |
+| `NEWS_GDELT_MAX_RETRIES` | Retry cap for GDELT requests |
+| `NEWS_GDELT_COOLDOWN_SECONDS` | Optional pause before each uncached GDELT request |
+| `NEWS_GDELT_CACHE_TTL_MINUTES` | Local TTL for identical GDELT query responses |
+
+HTTP 429 honors `Retry-After` and exponential backoff. In auto mode, a GDELT
+429 or other failure is recorded and the pipeline continues to configured RSS
+feeds. It never falls back to dummy articles.
 
 ## Retry and Failure Isolation
 
@@ -303,6 +361,10 @@ including `no_data` and failed runs:
 | `failed` | Invalid or failed article writes |
 | `status` | `success`, `partial`, `failed`, or `no_data` |
 | `error_message` | Truncated safe diagnostic |
+| `source_diagnostics` | Per-source JSON counts and errors |
+| `full_content_success_count` | Articles with confirmed full content |
+| `snippet_only_count` | Articles stored as snippets |
+| `duplicate_count` | Cleaning and live-load duplicate count |
 
 RLS is enabled and no anon/authenticated grants or policies are created.
 The service-role pipeline can access the table because service-role bypasses
@@ -328,11 +390,12 @@ The workflow runs unit tests before the live load. A partial, failed, or
 python -m unittest discover -s data_pipeline/tests -v
 ```
 
-Tests cover validation, HTML cleanup, duplicate removal, timestamp
-normalization, mocked GDELT extraction, real-provider priority and zero-data
-behavior, NLP structure/evaluation, LLM fallback, embedding shape, semantic
-fallback, RAG context use, demo-content rejection, observability writes, seed
-safety, and idempotent fake-client upserts.
+Tests cover validation, HTML cleanup, full-content extraction, snippet
+fallback, multi-RSS parsing, GDELT 429 fallback, stronger duplicate removal,
+timestamp normalization, mocked GDELT extraction, real-provider priority and
+zero-data behavior, NLP structure/evaluation, LLM fallback, embedding shape,
+semantic fallback, RAG context use, demo-content rejection, observability
+writes, seed safety, and idempotent fake-client upserts.
 
 ## Security
 
@@ -348,7 +411,8 @@ safety, and idempotent fake-client upserts.
 
 ## Limitations
 
-- RSS and NewsAPI frequently provide snippets instead of full content.
+- Some publishers expose only snippets, blocked pages, or script-rendered
+  content. The pipeline keeps snippets rather than bypassing restrictions.
 - GDELT is open and no-key, but Article List results may omit body text,
   images, topic labels, or source country. Indexing time is not guaranteed to
   equal the publisher's original publication time. The public endpoint may

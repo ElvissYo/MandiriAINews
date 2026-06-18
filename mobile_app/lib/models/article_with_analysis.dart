@@ -21,6 +21,7 @@ class ArticleWithAnalysis {
   String get url => article.url;
   String? get imageUrl => article.imageUrl;
   DateTime get publishedAt => article.publishedAt;
+  bool get contentIsSnippet => article.contentIsSnippet;
 
   String get content {
     final value = article.content.trim();

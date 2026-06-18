@@ -5,11 +5,12 @@ Supabase and a Python ETL/NLP pipeline. The product helps users read news faster
 through summaries, sentiment labels, topic classification, keywords,
 bookmarks, reading history, and simple recommendations.
 
-This repository currently includes **Advanced Phase 6A: AI/NLP Upgrade,
-Semantic Search, and RAG Q&A**. The previous intelligence features now include
-retry/backoff, backend-only run observability, scheduled ingestion, NLP
-contract evaluation, safer network errors, recommendation deduplication, and
-verified Android DNS connectivity.
+This repository currently includes **Phase 6B: Real Content Extraction,
+Multi-Source Reliability, GDELT Mitigation, and Stronger Deduplication**.
+The previous intelligence features now include retry/backoff, backend-only run
+observability, scheduled ingestion, NLP contract evaluation, semantic search,
+RAG Q&A, safer network errors, recommendation deduplication, and verified
+Android DNS connectivity.
 
 ## Current Deliverables
 
@@ -26,8 +27,12 @@ verified Android DNS connectivity.
 - Repository and provider boundaries for every user-specific table.
 - Supabase bootstrap using environment values instead of hard-coded keys.
 - PostgreSQL schema, seed data, indexes, triggers, grants, and RLS policies.
-- NewsAPI, open-data GDELT, and RSS extraction with an offline fallback.
-- Cleaning, URL/title deduplication, NLP analysis, and idempotent Supabase load.
+- NewsAPI, open-data GDELT, and multi-RSS extraction with no runtime dummy
+  fallback.
+- Legal public content extraction with snippet fallback, canonical URL capture,
+  and `content_is_snippet` metadata.
+- Cleaning, canonical URL/title-similarity deduplication, NLP analysis, and
+  idempotent Supabase load.
 - Provider-backed AI pipeline with rule-based fallback as the default.
 - Optional OpenAI-compatible summaries with local extractive fallback.
 - Optional transformer sentiment/topic providers when dependencies are
@@ -41,8 +46,9 @@ verified Android DNS connectivity.
 - Personalized recommendation ranking from history, preference, topic, and
   keyword overlap.
 - Guest trending fallback and Home insight for top topics and keywords.
-- Retry/backoff and per-article failure isolation for external ingestion.
-- Backend-only `pipeline_runs` observability records.
+- Retry/backoff, GDELT 429 mitigation, local GDELT response caching, and
+  per-article failure isolation for external ingestion.
+- Backend-only `pipeline_runs` observability records with source diagnostics.
 - Six-hour GitHub Actions ingestion with manual dispatch.
 - NLP structural evaluation and recommendation fallback tests.
 - User-friendly DNS/network errors with sanitized debug logging.
@@ -194,6 +200,12 @@ NEWS_GDELT_ENABLED=true
 NEWS_GDELT_QUERY=Indonesia OR ASEAN
 NEWS_GDELT_TIMESPAN=1d
 NEWS_GDELT_MAX_RECORDS=50
+NEWS_GDELT_COOLDOWN_SECONDS=0
+NEWS_GDELT_CACHE_TTL_MINUTES=15
+NEWS_GDELT_MAX_RETRIES=3
+NEWS_RSS_URLS=https://news.google.com/rss?hl=id&gl=ID&ceid=ID:id
+NEWS_FULL_CONTENT_ENABLED=true
+NEWS_FULL_CONTENT_MAX_ARTICLES=10
 LLM_SUMMARY_API_URL=
 LLM_SUMMARY_API_KEY=
 LLM_SUMMARY_MODEL=
@@ -240,6 +252,12 @@ mode the priority is NewsAPI when its key exists, enabled GDELT, RSS, then
 an explicit `no_data` result. Failed providers are never replaced with
 fabricated articles.
 
+`NEWS_RSS_URLS` accepts comma-separated or newline-separated public feed URLs.
+The extractor uses RSS full content when present, then public meta/article body
+text when accessible. It never bypasses paywalls or publisher restrictions; if
+full text cannot be legally extracted, the stored article keeps the provider
+snippet with `content_is_snippet=true`.
+
 To load records into Supabase, copy `.env.example` to `.env`, set the backend
 values, and explicitly add `--live`:
 
@@ -248,16 +266,16 @@ python data_pipeline/main_pipeline.py --source auto --limit 20 --live
 python data_pipeline/main_pipeline.py --source gdelt --limit 20 --live
 ```
 
-Before the first Phase 6A live run, reapply:
+Before the first Phase 6B live run, reapply:
 
 1. `database/schema.sql`
 2. `database/rls_policies.sql`
 
-This adds `articles.content_is_snippet`, the backend-only `pipeline_runs`
-table, optional `article_embeddings` storage when pgvector is available, and
-the fallback-safe `match_articles_by_embedding` RPC. If pgvector is not
-available, semantic search returns no rows and the app falls back to keyword
-search.
+This adds the extraction metadata columns on `articles`, the backend-only
+`pipeline_runs` source-diagnostic fields, optional `article_embeddings` storage
+when pgvector is available, and the fallback-safe
+`match_articles_by_embedding` RPC. If pgvector is not available, semantic
+search returns no rows and the app falls back to keyword search.
 
 Required live verification:
 
@@ -392,6 +410,30 @@ Manual app checks:
 3. Remove all LLM variables and confirm summaries, search, and Q&A still work
    with local fallbacks.
 
+## Verify Phase 6B Real Content and Source Reliability
+
+Run Python checks:
+
+```powershell
+python -m unittest discover -s data_pipeline/tests -v
+python data_pipeline/main_pipeline.py --source rss --limit 10
+$env:NEWS_RSS_URLS="https://feed.example/one.xml,https://feed.example/two.xml"
+python data_pipeline/main_pipeline.py --source rss --limit 10
+python data_pipeline/main_pipeline.py --source auto --limit 10
+```
+
+Use real public feed URLs for the multi-RSS command. For live verification
+after applying SQL:
+
+```powershell
+python data_pipeline/main_pipeline.py --source rss --limit 10 --live
+python data_pipeline/main_pipeline.py --source rss --limit 10 --live
+```
+
+The second live run should count existing records as duplicates instead of
+creating new article rows. If GDELT returns HTTP 429, auto mode records the
+failure and continues to RSS when feeds are configured.
+
 ## Apply the Supabase SQL
 
 Open **Supabase Dashboard > SQL Editor** and run the files in this exact order:
@@ -409,9 +451,9 @@ The scripts are designed to be re-runnable. After applying them:
 - Article and NLP writes remain available only to trusted backend/service-role
   processes.
 
-Phase 5 adds `articles.content_is_snippet` and `pipeline_runs`. Reapply
-`database/schema.sql` and `database/rls_policies.sql` before enabling scheduled
-ingestion.
+Phase 6B adds article extraction metadata, stronger canonical URL indexing,
+and `pipeline_runs` source diagnostics. Reapply `database/schema.sql` and
+`database/rls_policies.sql` before enabling scheduled ingestion.
 
 ## Environment Variables
 
@@ -434,7 +476,13 @@ ingestion.
 | `NEWS_GDELT_QUERY` | GDELT DOC query |
 | `NEWS_GDELT_TIMESPAN` | Recent GDELT search window |
 | `NEWS_GDELT_MAX_RECORDS` | GDELT request cap, maximum 250 |
-| `NEWS_RSS_URLS` | Comma-separated public RSS feeds |
+| `NEWS_GDELT_COOLDOWN_SECONDS` | Optional pause before live GDELT requests |
+| `NEWS_GDELT_CACHE_TTL_MINUTES` | Local cache TTL for identical GDELT queries |
+| `NEWS_GDELT_MAX_RETRIES` | GDELT retry cap, falling back to `NEWS_RETRY_ATTEMPTS` |
+| `NEWS_RSS_URLS` | Comma-separated or newline-separated public RSS feeds |
+| `NEWS_FULL_CONTENT_ENABLED` | Enables conservative public full-content extraction |
+| `NEWS_FULL_CONTENT_MAX_ARTICLES` | Maximum extracted article pages per run |
+| `NEWS_CONTENT_*` | Timeout, retry, and polite delay for article-page extraction |
 | `LLM_SUMMARY_API_*` | Optional private summary endpoint configuration |
 | `AI_ENABLE_TRANSFORMERS` | Optional local transformer sentiment/topic toggle |
 | `AI_SENTIMENT_PROVIDER` | `rule-based` or transformer provider selection |
@@ -461,7 +509,10 @@ ingestion.
 6. **Phase 6A - AI/NLP upgrade (implemented):** provider-backed NLP, optional
    LLM summaries, optional embeddings, semantic-search fallback, and RAG Q&A
    over stored real articles.
-7. **Later release work:** signed build preparation, model quality review,
+7. **Phase 6B - real content reliability (implemented):** legal public content
+   extraction, multi-RSS support, GDELT 429 mitigation, stronger cross-source
+   deduplication, and source diagnostics.
+8. **Later release work:** signed build preparation, model quality review,
    analytics dashboards, and push notifications.
 
 See [docs/prd.md](docs/prd.md), [docs/architecture.md](docs/architecture.md),

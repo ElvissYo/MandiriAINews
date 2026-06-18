@@ -5,6 +5,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from data_pipeline.clean_news import clean_articles
+from data_pipeline.content_extractor import (
+    extract_from_html,
+    extract_public_article_content,
+)
 from data_pipeline.ai_providers import (
     AiProviders,
     HashingEmbeddingProvider,
@@ -55,6 +59,92 @@ class CleaningTest(unittest.TestCase):
         self.assertTrue(cleaned[0]["content_is_snippet"])
         self.assertEqual(cleaned[0]["published_at"], "2026-06-14T01:30:00+00:00")
 
+    def test_cleaning_deduplicates_by_canonical_url_and_similar_title(self) -> None:
+        raw = [
+            {
+                "title": "Regional markets gain after policy update",
+                "content": "Markets gained after a banking policy update.",
+                "url": "https://newsroom.id/story?utm_source=rss",
+                "canonical_url": "https://newsroom.id/story",
+                "published_at": "2026-06-14T08:30:00+07:00",
+            },
+            {
+                "title": "Regional markets gain after policy update",
+                "content": "Duplicate from another provider.",
+                "url": "https://wire.news/story",
+                "canonical_url": "https://newsroom.id/story",
+                "published_at": "2026-06-14T08:31:00+07:00",
+            },
+            {
+                "title": "Regional markets gain after policy updates",
+                "content": "Near duplicate from another source.",
+                "url": "https://another.news/story",
+                "published_at": "2026-06-14T08:32:00+07:00",
+            },
+        ]
+
+        cleaned = clean_articles(raw)
+
+        self.assertEqual(len(cleaned), 1)
+        self.assertEqual(cleaned[0]["canonical_url"], "https://newsroom.id/story")
+
+
+class ContentExtractionTest(unittest.TestCase):
+    @patch.dict(os.environ, {"NEWS_FULL_CONTENT_MIN_CHARACTERS": "200"})
+    def test_full_content_extraction_success_using_mocked_html(self) -> None:
+        paragraph = " ".join(
+            f"public article sentence {index} contains reliable context"
+            for index in range(90)
+        )
+        html = (
+            "<html><head>"
+            '<link rel="canonical" href="https://publisher.test/story" />'
+            "</head><body><article><p>"
+            f"{paragraph}"
+            "</p></article></body></html>"
+        )
+
+        result = extract_from_html(
+            html,
+            "https://publisher.test/story?utm_source=rss",
+            fallback_content="Short source snippet.",
+        )
+
+        self.assertFalse(result.content_is_snippet)
+        self.assertEqual(result.extraction_method, "article_body")
+        self.assertEqual(result.extraction_status, "full_content")
+        self.assertEqual(result.canonical_url, "https://publisher.test/story")
+        self.assertIn("public article sentence", result.content)
+
+    def test_blocked_html_keeps_snippet_without_failure(self) -> None:
+        result = extract_from_html(
+            (
+                "<html><head>"
+                '<meta name="robots" content="nosnippet" />'
+                "</head><body><article><p>Full text unavailable.</p></article>"
+                "</body></html>"
+            ),
+            "https://publisher.test/blocked",
+            fallback_content="Publisher snippet.",
+        )
+
+        self.assertTrue(result.content_is_snippet)
+        self.assertEqual(result.extraction_status, "blocked_by_meta_robots")
+        self.assertEqual(result.content, "Publisher snippet.")
+
+    def test_fetch_failure_keeps_source_snippet(self) -> None:
+        result = extract_public_article_content(
+            "https://publisher.test/story",
+            "Source snippet remains available.",
+            session=_AlwaysFailSession(),
+            attempts=1,
+            delay_seconds=0,
+        )
+
+        self.assertTrue(result.content_is_snippet)
+        self.assertEqual(result.extraction_status, "failed")
+        self.assertEqual(result.content, "Source snippet remains available.")
+
 
 class ExtractionTest(unittest.TestCase):
     @patch.dict(
@@ -63,6 +153,7 @@ class ExtractionTest(unittest.TestCase):
             "NEWS_API_KEY": "test-news-key",
             "NEWS_GDELT_ENABLED": "true",
             "NEWS_RETRY_DELAY_SECONDS": "0",
+            "NEWS_GDELT_CACHE_TTL_MINUTES": "0",
         },
     )
     def test_auto_prefers_newsapi_when_key_exists(self) -> None:
@@ -84,6 +175,7 @@ class ExtractionTest(unittest.TestCase):
             "NEWS_GDELT_TIMESPAN": "1d",
             "NEWS_GDELT_MAX_RECORDS": "50",
             "NEWS_RETRY_DELAY_SECONDS": "0",
+            "NEWS_GDELT_CACHE_TTL_MINUTES": "0",
         },
     )
     def test_gdelt_extracts_normalized_open_data_articles(self) -> None:
@@ -97,7 +189,7 @@ class ExtractionTest(unittest.TestCase):
 
         self.assertEqual(result.provider, "gdelt")
         self.assertEqual(result.attempts, 1)
-        self.assertEqual(len(result.articles), 2)
+        self.assertEqual(len(result.articles), 1)
         self.assertEqual(
             result.articles[0]["published_at"],
             "2026-06-14T10:15:00+00:00",
@@ -121,6 +213,7 @@ class ExtractionTest(unittest.TestCase):
             "NEWS_API_KEY": "",
             "NEWS_GDELT_ENABLED": "true",
             "NEWS_RETRY_DELAY_SECONDS": "0",
+            "NEWS_GDELT_CACHE_TTL_MINUTES": "0",
         },
     )
     def test_auto_uses_enabled_gdelt_before_rss(self) -> None:
@@ -142,7 +235,11 @@ class ExtractionTest(unittest.TestCase):
     @patch("data_pipeline.extract_news.time.sleep")
     @patch.dict(
         os.environ,
-        {"NEWS_RETRY_ATTEMPTS": "2", "NEWS_RETRY_DELAY_SECONDS": "0"},
+        {
+            "NEWS_RETRY_ATTEMPTS": "2",
+            "NEWS_RETRY_DELAY_SECONDS": "0",
+            "NEWS_GDELT_CACHE_TTL_MINUTES": "0",
+        },
     )
     def test_gdelt_rate_limit_uses_retry_after(
         self,
@@ -157,6 +254,65 @@ class ExtractionTest(unittest.TestCase):
         self.assertEqual(result.provider, "gdelt")
         self.assertEqual(result.attempts, 2)
         sleep_mock.assert_called_once_with(7.0)
+
+    @patch.dict(
+        os.environ,
+        {
+            "NEWS_RETRY_ATTEMPTS": "1",
+            "NEWS_RETRY_DELAY_SECONDS": "0",
+            "NEWS_FULL_CONTENT_ENABLED": "false",
+            "NEWS_RSS_URLS": (
+                "https://example.com/feed-one.xml,\n"
+                "https://example.com/feed-two.xml"
+            ),
+        },
+    )
+    def test_multi_rss_parses_multiple_urls_and_deduplicates(self) -> None:
+        result = extract_news_with_report(
+            source="rss",
+            limit=5,
+            session=_MultiRssSession(),
+        )
+
+        self.assertEqual(result.provider, "rss")
+        self.assertEqual(len(result.articles), 2)
+        self.assertEqual(
+            [article["title"] for article in result.articles],
+            ["Market gains", "Technology investment expands"],
+        )
+        self.assertTrue(all(article["content_is_snippet"] for article in result.articles))
+        self.assertEqual(
+            [item["source_url"] for item in result.diagnostics],
+            ["https://example.com/feed-one.xml", "https://example.com/feed-two.xml"],
+        )
+
+    @patch("data_pipeline.extract_news.time.sleep")
+    @patch.dict(
+        os.environ,
+        {
+            "NEWS_API_KEY": "",
+            "NEWS_GDELT_ENABLED": "true",
+            "NEWS_GDELT_MAX_RETRIES": "1",
+            "NEWS_GDELT_CACHE_TTL_MINUTES": "0",
+            "NEWS_RETRY_ATTEMPTS": "1",
+            "NEWS_RETRY_DELAY_SECONDS": "0",
+            "NEWS_RSS_URLS": "https://example.com/fallback.xml",
+            "NEWS_FULL_CONTENT_ENABLED": "false",
+        },
+    )
+    def test_auto_continues_to_rss_after_gdelt_rate_limit(
+        self,
+        _sleep_mock,
+    ) -> None:
+        result = extract_news_with_report(
+            source="auto",
+            limit=1,
+            session=_GdeltRateLimitThenRssSession(),
+        )
+
+        self.assertEqual(result.provider, "rss")
+        self.assertEqual(len(result.articles), 1)
+        self.assertTrue(any("HTTP 429" in message for message in result.errors))
 
     @patch.dict(
         os.environ,
@@ -352,6 +508,21 @@ class LoaderTest(unittest.TestCase):
         self.assertEqual(len(client.rows["articles"]), 1)
         self.assertEqual(len(client.rows["article_analysis"]), 1)
 
+    def test_live_loader_uses_canonical_url_for_cross_source_duplicates(self) -> None:
+        client = _FakeClient()
+        first = _analyzed_article_fixture()
+        second = _analyzed_article_fixture()
+        first[0]["canonical_url"] = "https://newsroom.id/regional-markets"
+        second[0]["canonical_url"] = "https://newsroom.id/regional-markets"
+        second[0]["url"] = "https://mobile.newsroom.id/regional-markets"
+
+        SupabaseLoader(dry_run=False, client=client).load(first)
+        result = SupabaseLoader(dry_run=False, client=client).load(second)
+
+        self.assertEqual(result.inserted, 0)
+        self.assertEqual(result.skipped_duplicates, 1)
+        self.assertEqual(len(client.rows["articles"]), 1)
+
     def test_loader_skips_invalid_record_without_stopping(self) -> None:
         client = _FakeClient()
         valid = _analyzed_article_fixture()[0]
@@ -501,6 +672,22 @@ class PipelineNoDataTest(unittest.TestCase):
         self.assertIn("op.oprright = vector_type_oid", sql)
         self.assertIn("operator(%s.<=>)", sql.lower())
         self.assertIn("e.embedding_provider = $3", sql)
+
+    def test_phase6b_schema_contains_extraction_metadata(self) -> None:
+        schema_path = (
+            Path(__file__).resolve().parents[2] / "database" / "schema.sql"
+        )
+        sql = schema_path.read_text(encoding="utf-8")
+
+        for expected in (
+            "add column if not exists canonical_url text",
+            "add column if not exists extraction_method text",
+            "add column if not exists extraction_status text",
+            "add column if not exists source_diagnostics jsonb",
+            "add column if not exists duplicate_count integer",
+            "articles_canonical_url_unique_idx",
+        ):
+            self.assertIn(expected, sql)
 
 
 def _raw_article_fixture() -> dict:
@@ -667,6 +854,55 @@ class _RetrySession:
         )
 
 
+class _MultiRssSession:
+    def get(self, url, **_kwargs):
+        if "feed-one" in url:
+            body = (
+                b"<rss><channel><title>Feed One</title><item>"
+                b"<title>Market gains</title>"
+                b"<link>https://publisher.test/market?utm_source=rss</link>"
+                b"<description>Markets improved today.</description>"
+                b"<pubDate>Sun, 14 Jun 2026 10:00:00 GMT</pubDate>"
+                b"</item></channel></rss>"
+            )
+        else:
+            body = (
+                b"<rss><channel><title>Feed Two</title><item>"
+                b"<title>Market gains</title>"
+                b"<link>https://publisher.test/market?utm_medium=feed</link>"
+                b"<description>Duplicate item.</description>"
+                b"<pubDate>Sun, 14 Jun 2026 10:01:00 GMT</pubDate>"
+                b"</item><item>"
+                b"<title>Technology investment expands</title>"
+                b"<link>https://publisher.test/technology</link>"
+                b"<description>Technology investment expands in ASEAN.</description>"
+                b"<pubDate>Sun, 14 Jun 2026 10:02:00 GMT</pubDate>"
+                b"</item></channel></rss>"
+            )
+        return _Response([], content=body)
+
+
+class _GdeltRateLimitThenRssSession:
+    def get(self, url, **_kwargs):
+        if "gdeltproject" in url:
+            return _Response(
+                {},
+                status_code=429,
+                headers={"Retry-After": "1"},
+            )
+        return _Response(
+            [],
+            content=(
+                b"<rss><channel><title>Fallback Feed</title><item>"
+                b"<title>RSS fallback article</title>"
+                b"<link>https://publisher.test/rss-fallback</link>"
+                b"<description>RSS fallback stayed available.</description>"
+                b"<pubDate>Sun, 14 Jun 2026 10:00:00 GMT</pubDate>"
+                b"</item></channel></rss>"
+            ),
+        )
+
+
 class _AlwaysFailSession:
     def get(self, _url, **_kwargs):
         return _Response([], status_code=503)
@@ -714,6 +950,7 @@ class _FakeQuery:
         self.filters = []
         self.is_select = False
         self.is_insert = False
+        self.is_update = False
 
     def upsert(self, payload, on_conflict: str):
         self.payload = dict(payload)
@@ -723,6 +960,11 @@ class _FakeQuery:
     def insert(self, payload):
         self.payload = dict(payload)
         self.is_insert = True
+        return self
+
+    def update(self, payload):
+        self.payload = dict(payload)
+        self.is_update = True
         return self
 
     def select(self, _columns: str):
@@ -752,6 +994,15 @@ class _FakeQuery:
             }
             rows.append(inserted)
             return _Response([dict(inserted)])
+        if self.is_update:
+            matches = [
+                row
+                for row in rows
+                if all(row.get(column) == value for column, value in self.filters)
+            ]
+            for row in matches:
+                row.update(self.payload)
+            return _Response([dict(row) for row in matches])
 
         conflict_columns = [item.strip() for item in self.conflict.split(",")]
         existing = next(

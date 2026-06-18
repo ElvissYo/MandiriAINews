@@ -9,6 +9,10 @@ class Article {
     this.imageUrl,
     this.sourceId,
     this.categoryId,
+    this.canonicalUrl,
+    this.contentIsSnippet = false,
+    this.extractionMethod,
+    this.extractionStatus,
   });
 
   final String id;
@@ -18,8 +22,12 @@ class Article {
   final String? imageUrl;
   final String? sourceId;
   final String? categoryId;
+  final String? canonicalUrl;
   final DateTime publishedAt;
   final String status;
+  final bool contentIsSnippet;
+  final String? extractionMethod;
+  final String? extractionStatus;
 
   factory Article.fromMap(Map<String, dynamic> map) {
     return Article(
@@ -30,9 +38,13 @@ class Article {
       imageUrl: _nullableText(map['image_url']),
       sourceId: _nullableText(map['source_id']),
       categoryId: _nullableText(map['category_id']),
+      canonicalUrl: _nullableText(map['canonical_url']),
       publishedAt:
           DateTime.tryParse(_text(map['published_at'])) ?? DateTime.now(),
       status: _text(map['status'], fallback: 'published'),
+      contentIsSnippet: map['content_is_snippet'] == true,
+      extractionMethod: _nullableText(map['extraction_method']),
+      extractionStatus: _nullableText(map['extraction_status']),
     );
   }
 
