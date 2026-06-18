@@ -17,8 +17,9 @@ class AppBottomNavigation extends StatelessWidget {
         }
         final route = switch (index) {
           1 => AppRoutes.search,
-          2 => AppRoutes.bookmarks,
-          3 => AppRoutes.profile,
+          2 => AppRoutes.assistant,
+          3 => AppRoutes.bookmarks,
+          4 => AppRoutes.profile,
           _ => AppRoutes.home,
         };
         Navigator.pushReplacementNamed(context, route);
@@ -30,6 +31,11 @@ class AppBottomNavigation extends StatelessWidget {
           label: 'Home',
         ),
         NavigationDestination(icon: Icon(Icons.search), label: 'Search'),
+        NavigationDestination(
+          icon: Icon(Icons.auto_awesome_outlined),
+          selectedIcon: Icon(Icons.auto_awesome),
+          label: 'Assistant',
+        ),
         NavigationDestination(
           icon: Icon(Icons.bookmark_border),
           selectedIcon: Icon(Icons.bookmark),

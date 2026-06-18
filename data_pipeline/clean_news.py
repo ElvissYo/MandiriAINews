@@ -126,6 +126,7 @@ def clean_articles(
                 "category": category or "World News",
                 "published_at": normalize_timestamp(raw.get("published_at")),
                 "status": "published",
+                "content_is_snippet": bool(raw.get("content_is_snippet", False)),
             }
         )
 

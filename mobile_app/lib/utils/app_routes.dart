@@ -7,6 +7,7 @@ class AppRoutes {
   static const home = '/home';
   static const articleDetail = '/article';
   static const search = '/search';
+  static const assistant = '/assistant';
   static const bookmarks = '/bookmarks';
   static const profile = '/profile';
 }

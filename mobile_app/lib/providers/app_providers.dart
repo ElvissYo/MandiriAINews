@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/app_user.dart';
 import '../models/article_with_analysis.dart';
 import '../models/category.dart';
+import '../models/news_assistant_answer.dart';
 import '../models/profile_stats.dart';
 import '../models/reading_history_entry.dart';
 import '../models/trending_insight.dart';
@@ -180,6 +181,11 @@ final articleDetailProvider = FutureProvider.autoDispose
 final searchArticlesProvider = FutureProvider.autoDispose
     .family<List<ArticleWithAnalysis>, String>((ref, query) {
       return ref.watch(newsRepositoryProvider).searchArticles(query);
+    });
+
+final newsAssistantAnswerProvider = FutureProvider.autoDispose
+    .family<NewsAssistantAnswer, String>((ref, question) {
+      return ref.watch(newsRepositoryProvider).askNewsAssistant(question);
     });
 
 typedef RelatedArticleRequest = ({

@@ -61,7 +61,9 @@ class _ArticleDetailScreenState extends ConsumerState<ArticleDetailScreen> {
             return const AppEmptyState(
               icon: Icons.article_outlined,
               title: 'Article not found',
-              message: 'The article may have been removed or unpublished.',
+              message:
+                  'No real news data available yet. Please run the ingestion '
+                  'pipeline.',
             );
           }
           _recordReadingHistory();

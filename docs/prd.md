@@ -143,7 +143,8 @@ Detailed DDL and policies live in `database/`.
   file and tolerates an unconfigured project.
 - Seven required tables, constraints, indexes, seed rows, and RLS policies are
   defined.
-- ETL dummy data completes extract, clean, analysis, and dry-run load stages.
+- ETL unit fixtures validate extract, clean, analysis, and dry-run contracts
+  without entering the runtime ingestion path.
 - README contains reproducible setup and security instructions.
 
 ## Roadmap

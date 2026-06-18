@@ -25,7 +25,10 @@ class RecommendationRanker {
     int limit = 10,
     DateTime? now,
   }) {
-    final scored = candidates
+    if (limit <= 0) {
+      return const [];
+    }
+    final scored = _uniqueArticles(candidates)
         .where((article) => !signals.readArticleIds.contains(article.id))
         .map(
           (article) => (
@@ -50,9 +53,13 @@ class RecommendationRanker {
     int limit = 10,
     DateTime? now,
   }) {
+    if (limit <= 0) {
+      return const [];
+    }
+    final uniqueCandidates = _uniqueArticles(candidates);
     final topicCounts = <String, int>{};
     final keywordCounts = <String, int>{};
-    for (final article in candidates) {
+    for (final article in uniqueCandidates) {
       final topic = _normalize(article.topic);
       if (topic.isNotEmpty) {
         topicCounts.update(topic, (count) => count + 1, ifAbsent: () => 1);
@@ -69,7 +76,7 @@ class RecommendationRanker {
     }
 
     final referenceTime = now ?? DateTime.now().toUtc();
-    final scored = candidates
+    final scored = uniqueCandidates
         .map(
           (article) => (
             article: article,
@@ -137,4 +144,14 @@ class RecommendationRanker {
   }
 
   static String _normalize(String value) => value.trim().toLowerCase();
+
+  static List<ArticleWithAnalysis> _uniqueArticles(
+    Iterable<ArticleWithAnalysis> articles,
+  ) {
+    final unique = <String, ArticleWithAnalysis>{};
+    for (final article in articles) {
+      unique.putIfAbsent(article.id, () => article);
+    }
+    return unique.values.toList(growable: false);
+  }
 }

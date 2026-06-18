@@ -5,6 +5,7 @@ import 'screens/auth_gate_screen.dart';
 import 'screens/bookmark_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/news_assistant_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/search_screen.dart';
@@ -39,6 +40,7 @@ class MandiriNewsApp extends StatelessWidget {
             : '',
       ),
       AppRoutes.search => const SearchScreen(),
+      AppRoutes.assistant => const NewsAssistantScreen(),
       AppRoutes.bookmarks => const BookmarkScreen(),
       AppRoutes.profile => const ProfileScreen(),
       _ => const AuthGateScreen(),

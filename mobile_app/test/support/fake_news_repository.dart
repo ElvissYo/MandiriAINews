@@ -2,6 +2,7 @@ import 'package:mandiri_news_intelligence/models/article.dart';
 import 'package:mandiri_news_intelligence/models/article_analysis.dart';
 import 'package:mandiri_news_intelligence/models/article_with_analysis.dart';
 import 'package:mandiri_news_intelligence/models/category.dart';
+import 'package:mandiri_news_intelligence/models/news_assistant_answer.dart';
 import 'package:mandiri_news_intelligence/models/source.dart';
 import 'package:mandiri_news_intelligence/repositories/news_repository.dart';
 
@@ -9,8 +10,8 @@ class FakeNewsRepository implements NewsRepository {
   FakeNewsRepository({
     List<ArticleWithAnalysis>? articles,
     List<Category>? categories,
-  }) : articles = articles ?? testArticles,
-       categories = categories ?? testCategories;
+  }) : articles = articles ?? fixtureArticles,
+       categories = categories ?? fixtureCategories;
 
   final List<ArticleWithAnalysis> articles;
   final List<Category> categories;
@@ -18,6 +19,7 @@ class FakeNewsRepository implements NewsRepository {
   String? lastCategoryId;
   String? lastArticleId;
   String? lastSearchQuery;
+  String? lastAssistantQuestion;
   String? lastRecommendationUserId;
   int trendingCalls = 0;
 
@@ -75,6 +77,39 @@ class FakeNewsRepository implements NewsRepository {
   }
 
   @override
+  Future<List<ArticleWithAnalysis>> semanticSearchArticles(
+    String query, {
+    int limit = 20,
+  }) {
+    return searchArticles(query, limit: limit);
+  }
+
+  @override
+  Future<NewsAssistantAnswer> askNewsAssistant(
+    String question, {
+    int limit = 5,
+  }) async {
+    lastAssistantQuestion = question;
+    final sources = await searchArticles(question, limit: limit);
+    if (sources.isEmpty) {
+      return NewsAssistantAnswer(
+        question: question,
+        answer: 'No stored articles matched the question.',
+        sources: const [],
+        usedSemanticSearch: false,
+      );
+    }
+    return NewsAssistantAnswer(
+      question: question,
+      answer:
+          'Based on the retrieved articles: ${sources.first.title}: '
+          '${sources.first.summary}',
+      sources: sources,
+      usedSemanticSearch: true,
+    );
+  }
+
+  @override
   Future<ArticleWithAnalysis?> getFeaturedArticle() async {
     return articles.isEmpty ? null : articles.first;
   }
@@ -100,12 +135,12 @@ class FakeNewsRepository implements NewsRepository {
   }
 }
 
-const testCategories = [
+const fixtureCategories = [
   Category(id: 'economy', name: 'Economy'),
   Category(id: 'technology', name: 'Technology'),
 ];
 
-final testArticles = [
+final fixtureArticles = [
   ArticleWithAnalysis(
     article: Article(
       id: 'article-economy',
@@ -116,8 +151,8 @@ final testArticles = [
       publishedAt: DateTime.utc(2026, 6, 13),
       status: 'published',
     ),
-    source: const Source(id: 'source-1', name: 'Mandiri Demo'),
-    category: testCategories.first,
+    source: const Source(id: 'source-1', name: 'Fixture Newsroom'),
+    category: fixtureCategories.first,
     analysis: const ArticleAnalysis(
       id: 'analysis-1',
       articleId: 'article-economy',
@@ -138,8 +173,8 @@ final testArticles = [
       publishedAt: DateTime.utc(2026, 6, 12),
       status: 'published',
     ),
-    source: const Source(id: 'source-2', name: 'Tech Demo'),
-    category: testCategories.last,
+    source: const Source(id: 'source-2', name: 'Fixture Technology Desk'),
+    category: fixtureCategories.last,
     analysis: const ArticleAnalysis(
       id: 'analysis-2',
       articleId: 'article-technology',

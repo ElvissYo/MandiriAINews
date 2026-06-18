@@ -47,7 +47,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               textInputAction: TextInputAction.search,
               onChanged: _onQueryChanged,
               decoration: InputDecoration(
-                hintText: 'Search title, summary, topic, or keyword',
+                hintText: 'Search meaning, title, topic, or keyword',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _controller.text.isEmpty
                     ? null
@@ -83,7 +83,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         icon: Icons.manage_search,
         title: _query.isEmpty ? 'No recent news' : 'No matching articles',
         message: _query.isEmpty
-            ? 'Published articles will appear here once available.'
+            ? 'No real news data available yet. Please run the ingestion '
+                  'pipeline.'
             : 'Try a different title, topic, or keyword.',
       );
     }

@@ -1,5 +1,6 @@
 import '../models/article_with_analysis.dart';
 import '../models/category.dart';
+import '../models/news_assistant_answer.dart';
 
 abstract interface class NewsRepository {
   Future<List<ArticleWithAnalysis>> getLatestArticles({int limit = 20});
@@ -14,6 +15,16 @@ abstract interface class NewsRepository {
   Future<List<ArticleWithAnalysis>> searchArticles(
     String query, {
     int limit = 20,
+  });
+
+  Future<List<ArticleWithAnalysis>> semanticSearchArticles(
+    String query, {
+    int limit = 20,
+  });
+
+  Future<NewsAssistantAnswer> askNewsAssistant(
+    String question, {
+    int limit = 5,
   });
 
   Future<ArticleWithAnalysis?> getFeaturedArticle();

@@ -5,23 +5,45 @@ alter table public.sources enable row level security;
 alter table public.categories enable row level security;
 alter table public.articles enable row level security;
 alter table public.article_analysis enable row level security;
+do $$
+begin
+  if to_regclass('public.article_embeddings') is not null then
+    execute 'alter table public.article_embeddings enable row level security';
+  end if;
+end $$;
 alter table public.bookmarks enable row level security;
 alter table public.reading_history enable row level security;
 alter table public.user_preferences enable row level security;
+alter table public.pipeline_runs enable row level security;
 
 revoke all on table public.sources from anon, authenticated;
 revoke all on table public.categories from anon, authenticated;
 revoke all on table public.articles from anon, authenticated;
 revoke all on table public.article_analysis from anon, authenticated;
+do $$
+begin
+  if to_regclass('public.article_embeddings') is not null then
+    execute 'revoke all on table public.article_embeddings from anon, authenticated';
+  end if;
+end $$;
 revoke all on table public.bookmarks from anon, authenticated;
 revoke all on table public.reading_history from anon, authenticated;
 revoke all on table public.user_preferences from anon, authenticated;
+revoke all on table public.pipeline_runs from anon, authenticated;
 
 grant usage on schema public to anon, authenticated;
 grant select on table public.sources to anon, authenticated;
 grant select on table public.categories to anon, authenticated;
 grant select on table public.articles to anon, authenticated;
 grant select on table public.article_analysis to anon, authenticated;
+do $$
+begin
+  if to_regclass('public.article_embeddings') is not null then
+    execute 'grant select on table public.article_embeddings to anon, authenticated';
+  end if;
+end $$;
+grant execute on function public.match_articles_by_embedding(text, integer, text)
+  to anon, authenticated;
 grant select, insert, update, delete on table public.bookmarks to authenticated;
 grant select, insert, update, delete
   on table public.reading_history to authenticated;
@@ -59,6 +81,25 @@ using (
       and articles.status = 'published'
   )
 );
+
+do $$
+begin
+  if to_regclass('public.article_embeddings') is not null then
+    execute 'drop policy if exists "Public can read published article embeddings"
+      on public.article_embeddings';
+    execute 'create policy "Public can read published article embeddings"
+      on public.article_embeddings for select
+      to anon, authenticated
+      using (
+        exists (
+          select 1
+          from public.articles
+          where articles.id = article_embeddings.article_id
+            and articles.status = ''published''
+        )
+      )';
+  end if;
+end $$;
 
 drop policy if exists "Users can read own bookmarks" on public.bookmarks;
 create policy "Users can read own bookmarks"

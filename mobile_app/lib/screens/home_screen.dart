@@ -197,7 +197,7 @@ class _TrendingInsightSection extends StatelessWidget {
       data: (insight) {
         if (insight.topics.isEmpty && insight.keywords.isEmpty) {
           return Text(
-            'Trend insight will appear after analyzed articles are available.',
+            'No real news data available yet. Please run the ingestion pipeline.',
             style: Theme.of(context).textTheme.bodyMedium,
           );
         }
@@ -283,8 +283,10 @@ class _HorizontalArticleList extends StatelessWidget {
         if (articles.isEmpty) {
           return const AppEmptyState(
             icon: Icons.recommend_outlined,
-            title: 'No recommendations yet',
-            message: 'Read a few articles or refresh when more news is loaded.',
+            title: 'No recommendations available',
+            message:
+                'No real news data available yet. Please run the ingestion '
+                'pipeline.',
           );
         }
         return SizedBox(
@@ -387,8 +389,10 @@ class _FeaturedArticle extends StatelessWidget {
         if (article == null) {
           return const AppEmptyState(
             icon: Icons.newspaper_outlined,
-            title: 'No featured article',
-            message: 'A published article will appear here once available.',
+            title: 'No real news available',
+            message:
+                'No real news data available yet. Please run the ingestion '
+                'pipeline.',
           );
         }
         return NewsCard(
@@ -425,8 +429,10 @@ class _ArticleList extends StatelessWidget {
         if (articles.isEmpty) {
           return const AppEmptyState(
             icon: Icons.article_outlined,
-            title: 'No published articles',
-            message: 'Try another category or refresh the feed.',
+            title: 'No real news available',
+            message:
+                'No real news data available yet. Please run the ingestion '
+                'pipeline.',
           );
         }
         return Column(

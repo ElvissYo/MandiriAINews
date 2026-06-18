@@ -60,6 +60,25 @@ void main() {
     expect(find.text('Related articles'), findsOneWidget);
   });
 
+  testWidgets('home shows real-data ingestion guidance when feed is empty', (
+    tester,
+  ) async {
+    _useTallTestSurface(tester);
+    final repositories = _FakeRepositories(emptyNews: true);
+    addTearDown(repositories.dispose);
+
+    await tester.pumpWidget(repositories.app(initialRoute: AppRoutes.home));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'No real news data available yet. Please run the ingestion pipeline.',
+      ),
+      findsWidgets,
+    );
+    expect(find.byType(Card), findsNothing);
+  });
+
   testWidgets('search displays matching Supabase-style results', (
     tester,
   ) async {
@@ -75,6 +94,30 @@ void main() {
     expect(repositories.news.lastSearchQuery, 'inclusion');
     expect(find.text('Digital economy expands across Indonesia'), findsOne);
     expect(find.text('AI adoption moves into production'), findsNothing);
+  });
+
+  testWidgets('news assistant answers from retrieved article sources', (
+    tester,
+  ) async {
+    _useTallTestSurface(tester);
+    final repositories = _FakeRepositories();
+    addTearDown(repositories.dispose);
+    await tester.pumpWidget(
+      repositories.app(initialRoute: AppRoutes.assistant),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('newsAssistantQuestionField')),
+      'technology ai',
+    );
+    await tester.tap(find.byKey(const Key('newsAssistantAskButton')));
+    await tester.pumpAndSettle();
+
+    expect(repositories.news.lastAssistantQuestion, 'technology ai');
+    expect(find.text('Sources'), findsOneWidget);
+    expect(find.text('AI adoption moves into production'), findsOneWidget);
+    expect(find.text('Semantic retrieval'), findsOneWidget);
   });
 
   testWidgets('register, login, and logout use the auth controller', (
@@ -189,10 +232,11 @@ void main() {
 }
 
 class _FakeRepositories {
-  _FakeRepositories({AppUser? initialUser})
-    : auth = FakeAuthRepository(initialUser: initialUser);
+  _FakeRepositories({AppUser? initialUser, bool emptyNews = false})
+    : news = FakeNewsRepository(articles: emptyNews ? const [] : null),
+      auth = FakeAuthRepository(initialUser: initialUser);
 
-  final news = FakeNewsRepository();
+  final FakeNewsRepository news;
   final FakeAuthRepository auth;
   final bookmarks = FakeBookmarkRepository();
   final history = FakeReadingHistoryRepository();

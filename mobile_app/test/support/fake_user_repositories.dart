@@ -77,7 +77,7 @@ class FakeBookmarkRepository implements BookmarkRepository {
 
   @override
   Future<List<ArticleWithAnalysis>> getBookmarks(String userId) async {
-    return testArticles
+    return fixtureArticles
         .where((article) => savedArticleIds.contains(article.id))
         .toList(growable: false);
   }
@@ -108,7 +108,7 @@ class FakeReadingHistoryRepository implements ReadingHistoryRepository {
   Future<List<ReadingHistoryEntry>> getReadingHistory(String userId) async {
     return readAtByArticleId.entries
         .map((entry) {
-          final article = testArticles.firstWhere(
+          final article = fixtureArticles.firstWhere(
             (item) => item.id == entry.key,
           );
           return ReadingHistoryEntry(
@@ -128,7 +128,7 @@ class FakeReadingHistoryRepository implements ReadingHistoryRepository {
 
 class FakeUserPreferenceRepository implements UserPreferenceRepository {
   FakeUserPreferenceRepository({List<Category>? categories})
-    : categories = categories ?? testCategories;
+    : categories = categories ?? fixtureCategories;
 
   final List<Category> categories;
   String? selectedCategoryId;

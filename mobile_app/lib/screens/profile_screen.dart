@@ -32,7 +32,7 @@ class ProfileScreen extends ConsumerWidget {
               },
               child: _AuthenticatedProfile(user: user),
             ),
-      bottomNavigationBar: const AppBottomNavigation(currentIndex: 3),
+      bottomNavigationBar: const AppBottomNavigation(currentIndex: 4),
     );
   }
 }

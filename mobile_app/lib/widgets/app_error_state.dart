@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../utils/error_message.dart';
+import '../utils/safe_debug_log.dart';
 
-class AppErrorState extends StatelessWidget {
+class AppErrorState extends StatefulWidget {
   const AppErrorState({
     super.key,
     required this.title,
@@ -15,8 +17,27 @@ class AppErrorState extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
+  State<AppErrorState> createState() => _AppErrorStateState();
+}
+
+class _AppErrorStateState extends State<AppErrorState> {
+  @override
+  void initState() {
+    super.initState();
+    SafeDebugLog.error(widget.title, widget.error);
+  }
+
+  @override
+  void didUpdateWidget(covariant AppErrorState oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.error.toString() != widget.error.toString()) {
+      SafeDebugLog.error(widget.title, widget.error);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final details = error.toString().replaceFirst('Bad state: ', '');
+    final details = ErrorMessage.from(widget.error);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
@@ -38,7 +59,7 @@ class AppErrorState extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              title,
+              widget.title,
               style: Theme.of(context).textTheme.titleLarge,
               textAlign: TextAlign.center,
             ),
@@ -52,7 +73,7 @@ class AppErrorState extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             FilledButton.icon(
-              onPressed: onRetry,
+              onPressed: widget.onRetry,
               icon: const Icon(Icons.refresh),
               label: const Text('Try again'),
             ),
