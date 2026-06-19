@@ -127,6 +127,7 @@ class _ArticleContent extends ConsumerWidget {
           height: 220,
           width: double.infinity,
           borderRadius: BorderRadius.circular(20),
+          fallbackLabel: article.sourceName,
         ),
         const SizedBox(height: 22),
         Container(

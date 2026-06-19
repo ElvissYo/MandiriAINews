@@ -32,6 +32,36 @@ except ImportError:
 DEFAULT_NEWS_API_URL = "https://newsapi.org/v2/everything"
 DEFAULT_GDELT_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 _RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+_IMAGE_EXTENSIONS = (
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".avif",
+    ".bmp",
+)
+_RESERVED_IMAGE_HOSTS = {"example.com", "example.org", "example.net"}
+_PLACEHOLDER_IMAGE_HOSTS = {
+    "dummyimage.com",
+    "fakeimg.pl",
+    "placehold.co",
+    "placehold.it",
+    "placeholder.com",
+    "via.placeholder.com",
+}
+_PLACEHOLDER_IMAGE_MARKERS = (
+    "blank-image",
+    "blank_image",
+    "default-image",
+    "default_image",
+    "dummy",
+    "no-image",
+    "no_image",
+    "placeholder",
+    "sample-image",
+    "sample_image",
+)
 
 
 class RequestFailure(RuntimeError):
@@ -335,7 +365,7 @@ def _extract_gdelt(
                 "title": title,
                 "content": content,
                 "url": url,
-                "image_url": item.get("socialimage"),
+                "image_url": _gdelt_image_url(item),
                 "source_name": source_name or _host_name(url),
                 "source_url": _origin(url),
                 "source_country": item.get("sourcecountry"),
@@ -540,6 +570,10 @@ def _enrich_article_content(
         updated = {
             **record,
             "content": result.content or fallback,
+            "image_url": _first_http_url(
+                record.get("image_url"),
+                getattr(result, "image_url", None),
+            ),
             "content_is_snippet": result.content_is_snippet,
             "extraction_method": result.extraction_method,
             "extraction_status": result.extraction_status,
@@ -748,14 +782,128 @@ def _title_key(value: str) -> str:
 
 
 def _rss_image_url(item: ElementTree.Element) -> str | None:
-    for tag in ("media:content", "media:thumbnail", "enclosure"):
-        element = item.find(tag, _namespaces())
-        if element is None:
-            continue
-        url = element.attrib.get("url", "").strip()
-        media_type = element.attrib.get("type", "")
-        if url and (tag != "enclosure" or media_type.startswith("image/")):
+    for element in _rss_elements(
+        item,
+        namespace=_namespaces()["media"],
+        local="content",
+    ):
+        url = _rss_media_image_url(element, thumbnail=False)
+        if url:
             return url
+    for element in _rss_elements(
+        item,
+        namespace=_namespaces()["media"],
+        local="thumbnail",
+    ):
+        url = _rss_media_image_url(element, thumbnail=True)
+        if url:
+            return url
+    for element in _rss_elements(item, local="enclosure"):
+        url = _rss_enclosure_image_url(element)
+        if url:
+            return url
+    for local in ("image", "thumbnail", "imageurl", "image_url"):
+        for element in _rss_elements(item, local=local):
+            url = _rss_explicit_image_url(element)
+            if url:
+                return url
+    return None
+
+
+def _gdelt_image_url(item: dict[str, Any]) -> str | None:
+    for key in (
+        "socialimage",
+        "image",
+        "imageurl",
+        "image_url",
+        "thumbnail",
+        "thumbnailurl",
+        "thumb",
+    ):
+        image_url = _first_http_url(item.get(key))
+        if image_url:
+            return image_url
+    return None
+
+
+def _rss_media_image_url(
+    element: ElementTree.Element,
+    *,
+    thumbnail: bool,
+) -> str | None:
+    url = _attribute_url(element)
+    media_type = element.attrib.get("type", "").strip().lower()
+    medium = element.attrib.get("medium", "").strip().lower()
+    if thumbnail or medium == "image" or media_type.startswith("image/"):
+        return _first_http_url(url)
+    if _looks_like_image_url(url):
+        return _first_http_url(url)
+    return None
+
+
+def _rss_enclosure_image_url(element: ElementTree.Element) -> str | None:
+    url = _attribute_url(element)
+    media_type = element.attrib.get("type", "").strip().lower()
+    if media_type.startswith("image/") or _looks_like_image_url(url):
+        return _first_http_url(url)
+    return None
+
+
+def _rss_explicit_image_url(element: ElementTree.Element) -> str | None:
+    for candidate in (
+        _attribute_url(element),
+        _element_text(element),
+        _rss_child_text(element, "url"),
+    ):
+        image_url = _first_http_url(candidate)
+        if image_url:
+            return image_url
+    return None
+
+
+def _rss_elements(
+    item: ElementTree.Element,
+    *,
+    local: str,
+    namespace: str | None = None,
+) -> Iterable[ElementTree.Element]:
+    normalized_local = local.lower()
+    for element in item.iter():
+        if _local_name(element.tag).lower() != normalized_local:
+            continue
+        if namespace is not None and _namespace_uri(element.tag) != namespace:
+            continue
+        yield element
+
+
+def _attribute_url(element: ElementTree.Element) -> str:
+    for key in ("url", "href", "src"):
+        value = element.attrib.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _rss_child_text(element: ElementTree.Element, local: str) -> str:
+    normalized_local = local.lower()
+    for child in element:
+        if _local_name(child.tag).lower() == normalized_local:
+            return _element_text(child)
+    return ""
+
+
+def _looks_like_image_url(value: str) -> bool:
+    path = urlsplit(str(value or "").strip()).path.lower()
+    return any(path.endswith(extension) for extension in _IMAGE_EXTENSIONS)
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if tag.startswith("{") else tag
+
+
+def _namespace_uri(tag: str) -> str | None:
+    if tag.startswith("{") and "}" in tag:
+        return tag[1:].split("}", 1)[0]
     return None
 
 
@@ -905,6 +1053,41 @@ def _origin(url: str) -> str | None:
 def _host_name(url: str) -> str:
     host = urlsplit(url).netloc.removeprefix("www.")
     return host or "Unknown Source"
+
+
+def _first_http_url(*values: Any) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        lowered = text.lower()
+        if not text or lowered.startswith("data:") or "base64," in lowered:
+            continue
+        parts = urlsplit(text)
+        if parts.scheme not in {"http", "https"} or not parts.netloc:
+            continue
+        hostname = (parts.hostname or "").lower()
+        if _is_reserved_image_host(hostname) or _is_placeholder_image_url(
+            lowered,
+            hostname,
+        ):
+            continue
+        return text
+    return None
+
+
+def _is_reserved_image_host(hostname: str) -> bool:
+    return any(
+        hostname == reserved or hostname.endswith(f".{reserved}")
+        for reserved in _RESERVED_IMAGE_HOSTS
+    )
+
+
+def _is_placeholder_image_url(lowered_url: str, hostname: str) -> bool:
+    if any(
+        hostname == placeholder or hostname.endswith(f".{placeholder}")
+        for placeholder in _PLACEHOLDER_IMAGE_HOSTS
+    ):
+        return True
+    return any(marker in lowered_url for marker in _PLACEHOLDER_IMAGE_MARKERS)
 
 
 def _safe_error(

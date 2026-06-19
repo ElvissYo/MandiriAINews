@@ -30,7 +30,10 @@ Android DNS connectivity.
 - NewsAPI, open-data GDELT, and multi-RSS extraction with no runtime dummy
   fallback.
 - Legal public content extraction with snippet fallback, canonical URL capture,
-  and `content_is_snippet` metadata.
+  public meta image capture, and `content_is_snippet` metadata.
+- Real source article image extraction for NewsAPI, GDELT, RSS media/enclosure
+  fields, and public `og:image`/`twitter:image` metadata, with no dummy article
+  images inserted at runtime.
 - Cleaning, canonical URL/title-similarity deduplication, NLP analysis, and
   idempotent Supabase load.
 - Provider-backed AI pipeline with rule-based fallback as the default.
@@ -258,6 +261,19 @@ text when accessible. It never bypasses paywalls or publisher restrictions; if
 full text cannot be legally extracted, the stored article keeps the provider
 snippet with `content_is_snippet=true`.
 
+Article images are stored only from real source data. Extraction priority is:
+
+1. Provider image fields such as NewsAPI `urlToImage` or GDELT `socialimage`.
+2. RSS media/enclosure image fields such as `media:content`,
+   `media:thumbnail`, `enclosure`, or feed image tags.
+3. Public article metadata already fetched for content extraction, especially
+   `og:image` and `twitter:image`.
+4. `null`, with Flutter showing a clean cached-image placeholder fallback.
+
+Cleaning keeps only HTTP(S) image URLs and removes empty, data URI, base64,
+placeholder, and reserved/example-domain image values. The pipeline does not
+create or insert dummy article images.
+
 To load records into Supabase, copy `.env.example` to `.env`, set the backend
 values, and explicitly add `--live`:
 
@@ -431,8 +447,10 @@ python data_pipeline/main_pipeline.py --source rss --limit 10 --live
 ```
 
 The second live run should count existing records as duplicates instead of
-creating new article rows. If GDELT returns HTTP 429, auto mode records the
-failure and continues to RSS when feeds are configured.
+creating new article rows. Existing articles with `image_url=null` are updated
+when a later real-source run finds a valid image URL; a valid stored image URL
+is not overwritten by a later null. If GDELT returns HTTP 429, auto mode
+records the failure and continues to RSS when feeds are configured.
 
 ## Apply the Supabase SQL
 

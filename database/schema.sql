@@ -64,6 +64,8 @@ create table if not exists public.articles (
 alter table public.articles
   add column if not exists canonical_url text;
 alter table public.articles
+  add column if not exists image_url text;
+alter table public.articles
   add column if not exists content_is_snippet boolean not null default false;
 alter table public.articles
   add column if not exists extraction_method text not null default 'source_snippet';

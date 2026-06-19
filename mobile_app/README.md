@@ -9,3 +9,6 @@ verification instructions are maintained in the repository root `README.md`.
 Runtime screens display only published Supabase articles; when the real-source
 pipeline has not loaded data yet, the app shows ingestion guidance instead of
 fabricated fallback cards.
+Article cards and detail headers use cached real `image_url` values when
+available, and show a local placeholder UI for missing or failed images without
+storing dummy article images.

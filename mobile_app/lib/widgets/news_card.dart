@@ -119,6 +119,7 @@ class NewsCard extends StatelessWidget {
       imageUrl: article.imageUrl,
       height: height,
       width: width,
+      fallbackLabel: article.categoryName,
     );
   }
 

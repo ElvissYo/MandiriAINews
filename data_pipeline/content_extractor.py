@@ -35,6 +35,7 @@ class ContentExtractionResult:
     extraction_method: str
     extraction_status: str
     canonical_url: str | None = None
+    image_url: str | None = None
     error: str | None = None
 
 
@@ -44,6 +45,7 @@ class _ArticleHtmlParser(HTMLParser):
         self.base_url = base_url
         self.canonical_url: str | None = None
         self.meta: dict[str, str] = {}
+        self.link_images: list[str] = []
         self.robots = ""
         self.article_parts: list[str] = []
         self.paragraph_parts: list[str] = []
@@ -71,6 +73,8 @@ class _ArticleHtmlParser(HTMLParser):
             href = attrs_map.get("href", "").strip()
             if "canonical" in rel and href:
                 self.canonical_url = urljoin(self.base_url, href)
+            if "image_src" in rel and href:
+                self.link_images.append(urljoin(self.base_url, href))
             self._current_link_rel = rel
             return
 
@@ -207,6 +211,11 @@ def extract_from_html(
     parser = _ArticleHtmlParser(url)
     parser.feed(document or "")
     canonical_url = _valid_url(parser.canonical_url)
+    image_url = (
+        None
+        if _robots_disallow_images(parser.robots)
+        else _best_meta_image(parser.meta, parser.link_images, url)
+    )
     text_for_restrictions = " ".join(
         [
             parser.meta.get("description", ""),
@@ -221,6 +230,7 @@ def extract_from_html(
             method="source_snippet",
             status="blocked_by_meta_robots",
             canonical_url=canonical_url,
+            image_url=image_url,
         )
     if any(pattern.search(text_for_restrictions) for pattern in _BLOCKING_MARKERS):
         return _fallback(
@@ -228,6 +238,7 @@ def extract_from_html(
             method="source_snippet",
             status="blocked",
             canonical_url=canonical_url,
+            image_url=image_url,
         )
 
     article_text = _normalize_text(" ".join(parser.article_parts))
@@ -240,6 +251,7 @@ def extract_from_html(
             extraction_method="article_body",
             extraction_status="full_content",
             canonical_url=canonical_url,
+            image_url=image_url,
         )
 
     meta_description = _best_meta_description(parser.meta)
@@ -250,6 +262,7 @@ def extract_from_html(
             extraction_method="meta_description",
             extraction_status="snippet",
             canonical_url=canonical_url,
+            image_url=image_url,
         )
 
     return _fallback(
@@ -257,6 +270,7 @@ def extract_from_html(
         method="source_snippet",
         status="snippet",
         canonical_url=canonical_url,
+        image_url=image_url,
     )
 
 
@@ -307,12 +321,45 @@ def _best_meta_description(meta: dict[str, str]) -> str:
     return ""
 
 
+def _best_meta_image(
+    meta: dict[str, str],
+    link_images: list[str],
+    base_url: str,
+) -> str | None:
+    for key in (
+        "og:image:secure_url",
+        "og:image:url",
+        "og:image",
+        "twitter:image",
+        "twitter:image:src",
+        "image",
+        "thumbnail",
+        "thumbnailurl",
+    ):
+        value = meta.get(key, "").strip()
+        if value:
+            image_url = _valid_url(urljoin(base_url, value))
+            if image_url:
+                return image_url
+    for value in link_images:
+        image_url = _valid_url(urljoin(base_url, value))
+        if image_url:
+            return image_url
+    return None
+
+
+def _robots_disallow_images(value: str) -> bool:
+    robots = value.lower()
+    return "noimageindex" in robots or "none" in robots
+
+
 def _fallback(
     content: str,
     *,
     method: str,
     status: str,
     canonical_url: str | None = None,
+    image_url: str | None = None,
     error: str | None = None,
 ) -> ContentExtractionResult:
     return ContentExtractionResult(
@@ -321,6 +368,7 @@ def _fallback(
         extraction_method=method,
         extraction_status=status,
         canonical_url=_valid_url(canonical_url),
+        image_url=_valid_url(image_url),
         error=error,
     )
 

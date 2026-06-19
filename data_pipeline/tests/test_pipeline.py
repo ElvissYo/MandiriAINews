@@ -88,6 +88,20 @@ class CleaningTest(unittest.TestCase):
         self.assertEqual(len(cleaned), 1)
         self.assertEqual(cleaned[0]["canonical_url"], "https://newsroom.id/story")
 
+    def test_invalid_image_url_is_rejected(self) -> None:
+        raw = _raw_article_fixture()
+        raw["image_url"] = "data:image/png;base64,AAA"
+        self.assertIsNone(clean_articles([raw])[0]["image_url"])
+
+        raw["image_url"] = "https://example.com/placeholder.jpg"
+        self.assertIsNone(clean_articles([raw])[0]["image_url"])
+
+        raw["image_url"] = "https://cdn.newsroom.id/market.jpg"
+        self.assertEqual(
+            clean_articles([raw])[0]["image_url"],
+            "https://cdn.newsroom.id/market.jpg",
+        )
+
 
 class ContentExtractionTest(unittest.TestCase):
     @patch.dict(os.environ, {"NEWS_FULL_CONTENT_MIN_CHARACTERS": "200"})
@@ -130,6 +144,25 @@ class ContentExtractionTest(unittest.TestCase):
 
         self.assertTrue(result.content_is_snippet)
         self.assertEqual(result.extraction_status, "blocked_by_meta_robots")
+        self.assertEqual(result.content, "Publisher snippet.")
+
+    def test_og_image_extraction_from_mocked_html(self) -> None:
+        result = extract_from_html(
+            (
+                "<html><head>"
+                '<meta property="og:image" content="/images/story.jpg" />'
+                '<meta name="twitter:image" '
+                'content="https://cdn.publisher.test/twitter.jpg" />'
+                "</head><body><p>Short public snippet.</p></body></html>"
+            ),
+            "https://publisher.test/story",
+            fallback_content="Publisher snippet.",
+        )
+
+        self.assertEqual(
+            result.image_url,
+            "https://publisher.test/images/story.jpg",
+        )
         self.assertEqual(result.content, "Publisher snippet.")
 
     def test_fetch_failure_keeps_source_snippet(self) -> None:
@@ -284,6 +317,32 @@ class ExtractionTest(unittest.TestCase):
         self.assertEqual(
             [item["source_url"] for item in result.diagnostics],
             ["https://example.com/feed-one.xml", "https://example.com/feed-two.xml"],
+        )
+
+    @patch.dict(
+        os.environ,
+        {
+            "NEWS_RETRY_ATTEMPTS": "1",
+            "NEWS_RETRY_DELAY_SECONDS": "0",
+            "NEWS_FULL_CONTENT_ENABLED": "false",
+        },
+    )
+    def test_rss_extracts_images_from_media_thumbnail_and_enclosure(self) -> None:
+        result = extract_news_with_report(
+            source="rss",
+            limit=3,
+            rss_urls=["https://newsroom.id/feed.xml"],
+            session=_RssImageSession(),
+        )
+
+        self.assertEqual(result.provider, "rss")
+        self.assertEqual(
+            [article["image_url"] for article in result.articles],
+            [
+                "https://cdn.newsroom.id/media-content.jpg",
+                "https://cdn.newsroom.id/media-thumbnail.png",
+                "https://cdn.newsroom.id/enclosure.webp",
+            ],
         )
 
     @patch("data_pipeline.extract_news.time.sleep")
@@ -559,6 +618,37 @@ class LoaderTest(unittest.TestCase):
         self.assertEqual(result.embeddings_upserted, 1)
         self.assertEqual(len(client.rows["article_embeddings"]), 1)
 
+    def test_loader_rejects_invalid_image_url(self) -> None:
+        client = _FakeClient()
+        article = _analyzed_article_fixture()[0]
+        article["image_url"] = "data:image/png;base64,AAA"
+
+        result = SupabaseLoader(dry_run=False, client=client).load([article])
+
+        self.assertEqual(result.loaded, 0)
+        self.assertEqual(result.failed, 1)
+        self.assertEqual(client.rows["articles"], [])
+
+    def test_loader_updates_null_image_without_overwriting_valid_with_null(self) -> None:
+        client = _FakeClient()
+        loader = SupabaseLoader(dry_run=False, client=client)
+        first = _analyzed_article_fixture()
+        first[0]["image_url"] = None
+        second = _analyzed_article_fixture()
+        second[0]["image_url"] = "https://cdn.newsroom.id/regional-markets.jpg"
+        third = _analyzed_article_fixture()
+        third[0]["image_url"] = None
+
+        loader.load(first)
+        loader.load(second)
+        loader.load(third)
+
+        self.assertEqual(len(client.rows["articles"]), 1)
+        self.assertEqual(
+            client.rows["articles"][0]["image_url"],
+            "https://cdn.newsroom.id/regional-markets.jpg",
+        )
+
     def test_pipeline_run_observability_is_backend_only_loader_write(self) -> None:
         client = _FakeClient()
         loader = SupabaseLoader(dry_run=False, client=client)
@@ -681,6 +771,7 @@ class PipelineNoDataTest(unittest.TestCase):
 
         for expected in (
             "add column if not exists canonical_url text",
+            "add column if not exists image_url text",
             "add column if not exists extraction_method text",
             "add column if not exists extraction_status text",
             "add column if not exists source_diagnostics jsonb",
@@ -880,6 +971,34 @@ class _MultiRssSession:
                 b"</item></channel></rss>"
             )
         return _Response([], content=body)
+
+
+class _RssImageSession:
+    def get(self, _url, **_kwargs):
+        return _Response(
+            [],
+            content=(
+                b'<rss xmlns:media="http://search.yahoo.com/mrss/">'
+                b"<channel><title>Image Feed</title><item>"
+                b"<title>Media content image</title>"
+                b"<link>https://publisher.newsroom.id/media-content</link>"
+                b"<description>Media content image article.</description>"
+                b'<media:content url="https://cdn.newsroom.id/media-content.jpg" '
+                b'medium="image" />'
+                b"</item><item>"
+                b"<title>Media thumbnail image</title>"
+                b"<link>https://publisher.newsroom.id/media-thumbnail</link>"
+                b"<description>Media thumbnail image article.</description>"
+                b'<media:thumbnail url="https://cdn.newsroom.id/media-thumbnail.png" />'
+                b"</item><item>"
+                b"<title>Enclosure image</title>"
+                b"<link>https://publisher.newsroom.id/enclosure</link>"
+                b"<description>Enclosure image article.</description>"
+                b'<enclosure url="https://cdn.newsroom.id/enclosure.webp" '
+                b'type="image/webp" />'
+                b"</item></channel></rss>"
+            ),
+        )
 
 
 class _GdeltRateLimitThenRssSession:

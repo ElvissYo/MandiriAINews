@@ -189,6 +189,30 @@ The stored article metadata is:
 | `extraction_status` | `full_content`, `snippet`, `failed`, `blocked`, `blocked_by_meta_robots`, or `invalid_url` |
 | `canonical_url` | Public canonical URL when found |
 
+## Article Images
+
+The pipeline stores `image_url` only when a real source provides a valid
+HTTP(S) URL. It does not create dummy article images, does not use reserved
+example domains, and does not aggressively scrape pages for images.
+
+Image extraction priority:
+
+1. Provider image fields, such as NewsAPI `urlToImage` and GDELT
+   `socialimage` or equivalent image fields.
+2. RSS media/enclosure image fields, including `media:content`,
+   `media:thumbnail`, image `enclosure`, `image`, `thumbnail`, and common
+   feed-specific image URL fields.
+3. Public meta images from article pages that were already fetched for
+   content extraction, especially `og:image` and `twitter:image`.
+4. `null` when no valid image exists. Flutter then displays a UI placeholder
+   rather than storing fake article data.
+
+When public article pages are fetched for legal content extraction, the same
+bounded request also reads canonical URL, `og:image`, and `twitter:image`
+metadata. HTTP timeouts, blocked pages, paywalls, robots restrictions, and
+publisher restrictions still fall back safely to source snippets; image
+metadata failures never fail the whole pipeline.
+
 ## Cleaning Contract
 
 The cleaning stage:
@@ -198,6 +222,8 @@ The cleaning stage:
 - removes common tracking query parameters and URL fragments;
 - converts timestamps to UTC ISO-8601;
 - normalizes source names;
+- validates `image_url`, keeping only HTTP(S) URLs and removing empty, broken
+  format, data URI, base64, placeholder, and reserved/example-domain values;
 - applies `published` status;
 - preserves extraction metadata and snippet/full-content status;
 - removes duplicates by canonical URL, normalized URL, exact title key, or
@@ -212,10 +238,11 @@ unavailable.
 ## GDELT Source
 
 The adapter uses the public GDELT DOC 2.0 Article List JSON endpoint. It maps
-`title`, `url`, `socialimage`, `domain`, `sourcecountry`, and `seendate` into
-the shared article contract. GDELT Article List does not consistently return
-article body text, so `snippet`, `description`, or `content` is used when
-present; otherwise the title becomes the snippet fallback.
+`title`, `url`, `socialimage` or another available image field, `domain`,
+`sourcecountry`, and `seendate` into the shared article contract. GDELT Article
+List does not consistently return article body text, so `snippet`,
+`description`, or `content` is used when present; otherwise the title becomes
+the snippet fallback.
 
 `NEWS_GDELT_MAX_RECORDS` is clamped to the API limit of 250 and is also bounded
 by the CLI `--limit`. Boolean `OR` queries are wrapped in parentheses for the
@@ -345,6 +372,9 @@ The loader uses existing unique constraints:
 | `article_analysis` | `article_id` |
 
 Running the same input repeatedly updates rows rather than creating duplicates.
+If a newer run finds a valid `image_url` for an existing article that has
+`image_url=null`, the loader updates the article. It does not overwrite an
+existing valid `image_url` with null from a later provider response.
 
 ## Observability
 
@@ -393,9 +423,11 @@ python -m unittest discover -s data_pipeline/tests -v
 Tests cover validation, HTML cleanup, full-content extraction, snippet
 fallback, multi-RSS parsing, GDELT 429 fallback, stronger duplicate removal,
 timestamp normalization, mocked GDELT extraction, real-provider priority and
-zero-data behavior, NLP structure/evaluation, LLM fallback, embedding shape,
-semantic fallback, RAG context use, demo-content rejection, observability
-writes, seed safety, and idempotent fake-client upserts.
+zero-data behavior, RSS media image extraction, public `og:image` extraction,
+invalid image rejection, image-preserving duplicate updates, NLP
+structure/evaluation, LLM fallback, embedding shape, semantic fallback, RAG
+context use, demo-content rejection, observability writes, seed safety, and
+idempotent fake-client upserts.
 
 ## Security
 
@@ -413,6 +445,9 @@ writes, seed safety, and idempotent fake-client upserts.
 
 - Some publishers expose only snippets, blocked pages, or script-rendered
   content. The pipeline keeps snippets rather than bypassing restrictions.
+- Some publishers and feed providers omit real image URLs or expose image URLs
+  that later expire. Those records keep `image_url=null`, and the Flutter UI
+  shows a stable placeholder.
 - GDELT is open and no-key, but Article List results may omit body text,
   images, topic labels, or source country. Indexing time is not guaranteed to
   equal the publisher's original publication time. The public endpoint may

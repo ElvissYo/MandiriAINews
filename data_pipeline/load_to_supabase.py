@@ -17,6 +17,26 @@ _BLOCKED_RUNTIME_MARKERS = (
     re.compile(r"\blorem ipsum\b", re.IGNORECASE),
 )
 _RESERVED_TEST_HOSTS = {"example.com", "example.org", "example.net"}
+_PLACEHOLDER_IMAGE_HOSTS = {
+    "dummyimage.com",
+    "fakeimg.pl",
+    "placehold.co",
+    "placehold.it",
+    "placeholder.com",
+    "via.placeholder.com",
+}
+_PLACEHOLDER_IMAGE_MARKERS = (
+    "blank-image",
+    "blank_image",
+    "default-image",
+    "default_image",
+    "dummy",
+    "no-image",
+    "no_image",
+    "placeholder",
+    "sample-image",
+    "sample_image",
+)
 
 
 @dataclass(frozen=True)
@@ -108,10 +128,13 @@ class SupabaseLoader:
                     )
                     category_count += 1
 
-                existing_id = self._existing_article_id(
+                existing_article = self._existing_article(
                     client,
                     article["url"],
                     article.get("canonical_url"),
+                )
+                existing_id = (
+                    str(existing_article["id"]) if existing_article else None
                 )
                 article_payload = {
                     "title": article["title"],
@@ -149,6 +172,15 @@ class SupabaseLoader:
                         value=article["url"],
                     )
                 else:
+                    if (
+                        not article_payload.get("image_url")
+                        and self._valid_image_url(
+                            existing_article.get("image_url")
+                            if existing_article
+                            else None
+                        )
+                    ):
+                        article_payload.pop("image_url", None)
                     (
                         client.table("articles")
                         .update(article_payload)
@@ -255,32 +287,41 @@ class SupabaseLoader:
         )
 
     @staticmethod
-    def _existing_article_id(
+    def _existing_article(
         client: Any,
         url: str,
         canonical_url: str | None = None,
-    ) -> str | None:
+    ) -> dict[str, Any] | None:
         lookup_values = [value for value in (canonical_url, url) if value]
         for value in lookup_values:
             response = (
                 client.table("articles")
-                .select("id")
+                .select("id,image_url")
                 .eq("canonical_url", value)
                 .limit(1)
                 .execute()
             )
             if response.data:
-                return str(response.data[0]["id"])
+                return dict(response.data[0])
         response = (
             client.table("articles")
-            .select("id")
+            .select("id,image_url")
             .eq("url", url)
             .limit(1)
             .execute()
         )
         if response.data:
-            return str(response.data[0]["id"])
+            return dict(response.data[0])
         return None
+
+    @staticmethod
+    def _existing_article_id(
+        client: Any,
+        url: str,
+        canonical_url: str | None = None,
+    ) -> str | None:
+        row = SupabaseLoader._existing_article(client, url, canonical_url)
+        return str(row["id"]) if row else None
 
     @staticmethod
     def _response_id(
@@ -350,6 +391,10 @@ class SupabaseLoader:
         hostname = urlsplit(str(record.get("url") or "")).hostname
         if hostname in _RESERVED_TEST_HOSTS:
             return "reserved example-domain articles are not allowed"
+        if record.get("image_url") is not None and not SupabaseLoader._valid_image_url(
+            record.get("image_url")
+        ):
+            return "image_url is invalid"
         analysis = record["analysis"]
         expected_analysis = {
             "summary",
@@ -387,3 +432,25 @@ class SupabaseLoader:
         if service_key:
             message = message.replace(service_key, "[redacted]")
         return message[:500]
+
+    @staticmethod
+    def _valid_image_url(value: Any) -> bool:
+        text = str(value or "").strip()
+        lowered = text.lower()
+        if not text or lowered.startswith("data:") or "base64," in lowered:
+            return False
+        parts = urlsplit(text)
+        if parts.scheme not in {"http", "https"} or not parts.netloc:
+            return False
+        hostname = (parts.hostname or "").lower()
+        if any(
+            hostname == reserved or hostname.endswith(f".{reserved}")
+            for reserved in _RESERVED_TEST_HOSTS
+        ):
+            return False
+        if any(
+            hostname == placeholder or hostname.endswith(f".{placeholder}")
+            for placeholder in _PLACEHOLDER_IMAGE_HOSTS
+        ):
+            return False
+        return not any(marker in lowered for marker in _PLACEHOLDER_IMAGE_MARKERS)

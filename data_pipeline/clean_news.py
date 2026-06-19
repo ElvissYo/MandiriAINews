@@ -24,6 +24,27 @@ _TRACKING_PARAMETERS = {
     "utm_source",
     "utm_term",
 }
+_RESERVED_IMAGE_HOSTS = {"example.com", "example.org", "example.net"}
+_PLACEHOLDER_IMAGE_HOSTS = {
+    "dummyimage.com",
+    "fakeimg.pl",
+    "placehold.co",
+    "placehold.it",
+    "placeholder.com",
+    "via.placeholder.com",
+}
+_PLACEHOLDER_IMAGE_MARKERS = (
+    "blank-image",
+    "blank_image",
+    "default-image",
+    "default_image",
+    "dummy",
+    "no-image",
+    "no_image",
+    "placeholder",
+    "sample-image",
+    "sample_image",
+)
 
 
 class _TextExtractor(HTMLParser):
@@ -134,7 +155,7 @@ def clean_articles(
                 "content": strip_html(str(raw.get("content") or "")),
                 "url": url,
                 "canonical_url": canonical_url,
-                "image_url": _nullable_url(raw.get("image_url")),
+                "image_url": _nullable_image_url(raw.get("image_url")),
                 "source_name": normalize_source_name(raw.get("source_name")),
                 "source_url": _nullable_url(raw.get("source_url")),
                 "source_country": _nullable_text(raw.get("source_country")),
@@ -184,9 +205,52 @@ def _nullable_url(value: Any) -> str | None:
     return text if _is_http_url(text) else None
 
 
+def _nullable_image_url(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    if lowered.startswith("data:") or "base64," in lowered:
+        return None
+    if not _is_http_url(text):
+        return None
+    parts = urlsplit(text)
+    hostname = (parts.hostname or "").lower()
+    if _is_reserved_image_host(hostname) or _is_placeholder_image_url(
+        lowered,
+        hostname,
+    ):
+        return None
+    return urlunsplit(
+        (
+            parts.scheme.lower(),
+            parts.netloc.lower(),
+            parts.path or "/",
+            parts.query,
+            "",
+        )
+    )
+
+
 def _is_http_url(value: str) -> bool:
     parts = urlsplit(value)
     return parts.scheme in {"http", "https"} and bool(parts.netloc)
+
+
+def _is_reserved_image_host(hostname: str) -> bool:
+    return any(
+        hostname == reserved or hostname.endswith(f".{reserved}")
+        for reserved in _RESERVED_IMAGE_HOSTS
+    )
+
+
+def _is_placeholder_image_url(lowered_url: str, hostname: str) -> bool:
+    if any(
+        hostname == placeholder or hostname.endswith(f".{placeholder}")
+        for placeholder in _PLACEHOLDER_IMAGE_HOSTS
+    ):
+        return True
+    return any(marker in lowered_url for marker in _PLACEHOLDER_IMAGE_MARKERS)
 
 
 def _is_similar_title(title: str, existing_titles: list[str]) -> bool:
